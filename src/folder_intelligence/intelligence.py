@@ -12,6 +12,8 @@ Ricerca ibrida (reciprocal rank fusion): FTS5 + semantica + Spotlight + nome fil
 
 from __future__ import annotations
 
+import os
+
 import asyncio
 import atexit
 import tempfile
@@ -25,13 +27,24 @@ from . import shell
 from .ai import AIEngine
 from .classifier import CATEGORIES, RuleClassifier
 from .extractors import ExtractContext, Extraction, Extractor, load_extractors
+from .engines.base import TEXT, VISION
 from .index import Index, query_terms
 from .threads import Cancelled, Timeout
 
 EXTRACT_TIMEOUT = 240  # secondi massimi per file (OCR + modello visivo inclusi)
 MAX_FILE_BYTES = 2 * 1024 ** 3  # oltre: solo metadati
-SEMANTIC_MIN = 0.40     # similarità minima (bge-m3) per considerare un risultato
-SEMANTIC_MARGIN = 0.07  # distanza massima dal risultato migliore
+# Soglie per bge-m3, misurate su documenti reali: pertinenti ≈ 0.55–0.71, estranei ≤ 0.50.
+PHASE_BATCH = int(os.environ.get("FI_PHASE_BATCH", "16"))  # file per blocco (cambio modello)
+VISUAL_EXT = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tif", ".tiff", ".gif", ".bmp",
+              ".pdf", ".mp4", ".mov", ".m4v", ".mkv", ".avi"}  # possono richiedere il modello visivo
+SEMANTIC_MIN = float(os.environ.get("FI_SEMANTIC_MIN", "0.53"))  # ricerca "cerca": precisa
+SEMANTIC_MIN_LOOSE = 0.40   # domande ("chiedi"): meglio qualche fonte in più, sceglie il modello
+SEMANTIC_MARGIN = 0.07      # distanza massima dal risultato migliore
+
+
+def required_terms(n: int) -> int:
+    """Quante parole della ricerca devono comparire nel testo: 1 su 1, 2 su 2-3, metà oltre."""
+    return 1 if n <= 1 else 2 if n <= 3 else (n + 1) // 2
 
 EXPAND_SYSTEM = ("Espandi la richiesta di ricerca file dell'utente. Rispondi SOLO JSON: "
                  '{"keywords": ["6-10 parole chiave in italiano: sinonimi e termini collegati che '
@@ -139,12 +152,21 @@ class DocumentIntelligence:
         st = path.stat()
         if not force and self.index.fresh(path, st.st_size, st.st_mtime):
             return self.index.get(path)  # type: ignore[return-value]
+        return await self._finish(await self._read(path))
+
+    async def _read(self, path: Path) -> tuple[Path, os.stat_result, dict[str, Any], Extraction]:
+        """Fase 1: metadati ed estrazione (OCR, modello visivo per immagini/scansioni/video)."""
+        st = path.stat()
         if st.st_flags & 0x40000000 if hasattr(st, "st_flags") else False:
             raise CloudOnly(path)
-
         meta = await shell.mdls(path)
         ex = Extraction(engine="metadata-only") if st.st_size > MAX_FILE_BYTES else await self.extract(path)
         meta.update(ex.metadata)
+        return path, st, meta, ex
+
+    async def _finish(self, read: tuple[Path, os.stat_result, dict[str, Any], Extraction]) -> dict[str, Any]:
+        """Fase 2: comprensione con il modello di testo, embedding, salvataggio nell'indice."""
+        path, st, meta, ex = read
         info = await self.understand(path, ex, meta)
         meta.update({k: info[k] for k in ("date", "amount", "doc_type") if info.get(k)})
 
@@ -167,6 +189,51 @@ class DocumentIntelligence:
                 embedding = None
         self.index.upsert(doc, embedding)
         return self.index.get(path)  # type: ignore[return-value]
+
+    async def _analyze_in_phases(self, todo: list[Path], stats: "AnalyzeStats",
+                                 progress: Callable[..., None] | None, cancel: threading.Event | None,
+                                 concurrency: int) -> None:
+        sem = asyncio.Semaphore(concurrency)
+        done = 0
+
+        def stop() -> bool:
+            return cancel is not None and cancel.is_set()
+
+        async def guarded(fn, p, *args):
+            async with sem:
+                if stop():
+                    return None
+                try:
+                    return await fn(*args)
+                except Exception as e:  # noqa: BLE001
+                    stats.errors.append(f"{p.name}: {e}")
+                    return None
+
+        for i in range(0, len(todo), PHASE_BATCH):
+            if stop():
+                return
+            batch = todo[i:i + PHASE_BATCH]
+            visual = [p for p in batch if p.suffix.lower() in VISUAL_EXT]
+            if visual:
+                await self.ai.release(TEXT)          # 1) spazio al modello visivo
+            if progress:
+                progress("analyze", done, len(todo), f"lettura di {len(batch)} file")
+            reads = await asyncio.gather(*(guarded(self._read, p, p) for p in batch))
+            if visual:
+                await self.ai.release(VISION)        # 2) spazio al modello di testo
+            for p, r in zip(batch, reads):
+                if r is None or stop():
+                    continue
+                if progress:
+                    progress("analyze", done, len(todo), p.name)
+                doc = await guarded(self._finish, p, r)
+                if doc is not None:
+                    stats.analyzed += 1
+                    eng = doc.get("engine", "?")
+                    stats.engines[eng] = stats.engines.get(eng, 0) + 1
+                done += 1
+                if progress:
+                    progress("analyze", done, len(todo), p.name)
 
     async def analyze_many(
         self, paths: list[Path], limit: int | None = None, force: bool = False,
@@ -194,6 +261,19 @@ class DocumentIntelligence:
         done = 0
         if progress:
             progress("analyze", 0, len(todo))
+
+        # Poca memoria e motori diversi per testo e immagini (es. llama.cpp + Ollama): si lavora a
+        # blocchi, prima tutte le letture visive del blocco (modello di testo scaricato), poi tutta
+        # la comprensione (modello visivo scaricato): mai i due modelli grandi insieme in memoria.
+        swap = getattr(self.ai, "swap_text_and_vision", None)
+        if self.ai and self.use_vision and todo and callable(swap) and swap() \
+                and await self.ai.can_see():
+            await self._analyze_in_phases(todo, stats, progress, cancel, concurrency)
+            self.index.flush(force=True)
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            stats.seconds = time.monotonic() - start
+            return stats
 
         async def one(p: Path) -> None:
             nonlocal done
@@ -224,8 +304,12 @@ class DocumentIntelligence:
 
     # ------------------------------------------------------------------ ricerca
     async def search(self, query: str, root: Path | None = None, limit: int = 20,
-                     names: list[Path] | None = None) -> list[Hit]:
-        """Ricerca ibrida con reciprocal rank fusion."""
+                     names: list[Path] | None = None, precise: bool = True) -> list[Hit]:
+        """Ricerca ibrida con reciprocal rank fusion.
+
+        `precise` (comando "cerca"): il testo deve contenere quasi tutte le parole cercate e il
+        significato deve superare una soglia alta; se niente è davvero pertinente → nessun
+        risultato. Le domande ("chiedi") usano precise=False: più fonti, le filtra il modello."""
         K = 60
         scores: dict[str, float] = {}
         snippets: dict[str, str] = {}
@@ -236,7 +320,8 @@ class DocumentIntelligence:
                 scores[p] = scores.get(p, 0) + weight / (K + rank + 1)
                 sources.setdefault(p, []).append(label)
 
-        fts = self.index.fts(query, root, 50)
+        need = required_terms(len(query_terms(query))) if precise else 1
+        fts = self.index.fts(query, root, 50, min_match=need)
         add([p for p, _, _ in fts], "testo", 1.0)
         for p, _, snip in fts:
             snippets.setdefault(p, snip)
@@ -244,16 +329,25 @@ class DocumentIntelligence:
         if self.ai and await self.ai.can_embed() and self.index.stats(root)["with_embedding"]:
             try:
                 expanded = await self.expand_query(query)
-                vec = (await self.ai.embed([query + (". " + ", ".join(expanded) if expanded else "")]))[0]
-                sem = self.index.semantic(vec, root, 50, min_score=0.0)
+                texts = [query] + ([query + ". " + ", ".join(expanded)] if expanded else [])
+                vecs = await self.ai.embed(texts)
+                # per ogni documento il punteggio migliore tra richiesta originale ed espansa:
+                # i sinonimi aiutano ("macchina" → auto) ma a volte diluiscono ("mediazione")
+                best: dict[str, float] = {}
+                for vec in vecs:
+                    for p, sc in self.index.semantic(vec, root, 50, min_score=0.0):
+                        best[p] = max(best.get(p, 0.0), sc)
+                sem = sorted(best.items(), key=lambda kv: -kv[1])
                 if sem:
                     # soglia assoluta + relativa al migliore: evita risultati "vagamente simili"
-                    cut = max(SEMANTIC_MIN, sem[0][1] - SEMANTIC_MARGIN)
+                    floor = SEMANTIC_MIN if precise else SEMANTIC_MIN_LOOSE
+                    cut = max(floor, sem[0][1] - SEMANTIC_MARGIN)
                     add([p for p, sc in sem if sc >= cut], "significato", 1.2)
             except Exception:
                 pass
 
-        spot = await shell.mdfind(query, root, 50)
+        spot_query = " ".join(query_terms(query)) if precise else query
+        spot = await shell.mdfind(spot_query, root, 50) if spot_query else []
         add([str(p) for p in spot if p.is_file()], "spotlight", 0.8)
 
         if names:
@@ -290,7 +384,7 @@ class DocumentIntelligence:
     async def ask(self, question: str, root: Path | None = None, names: list[Path] | None = None
                   ) -> tuple[str, list[Hit]]:
         """Risponde a una domanda usando i documenti più pertinenti (RAG locale)."""
-        hits = [h for h in await self.search(question, root, 8, names) if h.doc]
+        hits = [h for h in await self.search(question, root, 8, names, precise=False) if h.doc]
         if not hits:
             return "", []
         if not (self.ai and await self.ai.is_available()):

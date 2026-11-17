@@ -39,7 +39,14 @@ class SearchCommand(Command):
             q = await ctx.require_index(scan, lambda: self.run(ctx, intent), "cercare dentro documenti, PDF e immagini")
             if q:
                 return f"Nessun file ha '{query}' nel nome.\n" + q
-            return f"Nessun file corrisponde a '{query}' in {scan.root}."
+            indexed = ctx.intelligence.index.stats(scan.root)["documents"]
+            readable = sum(1 for f in scan.files if not f.cloud_only)
+            msg = f"Nessun file pertinente per '{query}' in {scan.root}."
+            if readable > indexed:
+                msg += (f"\nHo letto il contenuto di {indexed} file su {readable}: "
+                        "scrivi 'indicizza la cartella' per cercare anche negli altri.")
+            return CommandResult(msg, {"query": query, "root": str(scan.root), "items": [],
+                                       "indexed": indexed, "readable": readable})
 
         data = {"query": query, "root": str(scan.root), "items": [
             {"path": h.path, "score": round(h.score, 4), "matched_by": list(dict.fromkeys(h.sources)),

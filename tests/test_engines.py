@@ -145,3 +145,56 @@ def test_live_llamacpp_schema_and_embeddings():
     vec = run(e.embed(["ciao"]))[0]
     assert len(vec) == 1024 and abs(sum(x * x for x in vec) - 1) < 1e-3
     e.close()
+
+
+def test_indexing_never_keeps_text_and_vision_models_loaded_together(tmp_path, monkeypatch):
+    from folder_intelligence.extractors.base import Extraction
+    from folder_intelligence.index import Index
+    from folder_intelligence.intelligence import DocumentIntelligence
+
+    log = []
+
+    class Text(Fake):
+        def release(self, capability):
+            log.append(f"release-{capability}")
+
+        async def generate_json(self, prompt, system="", schema=None, model=None):
+            log.append("text")
+            return {"category": "documenti", "title": "t", "description": "d", "tags": []}
+
+    class Vision(FakeVision):
+        async def available(self, capability=TEXT):
+            return capability == VISION
+
+        def release(self, capability):
+            log.append(f"release-{capability}")
+
+        async def describe_image(self, image, prompt, as_json=False):
+            log.append("vision")
+            return "foto"
+
+    monkeypatch.setenv("FI_LOW_MEMORY", "1")
+    monkeypatch.setattr("folder_intelligence.intelligence.PHASE_BATCH", 3)
+    files = []
+    for i in range(5):
+        f = tmp_path / f"img{i}.png"
+        f.write_bytes(b"x" * (i + 1))
+        files.append(f)
+    text = Text("t", embed_model="e")
+    ai = AIEngine(text, Vision(vision_model="v"), text)
+    di = DocumentIntelligence(ai, index=Index(), use_vision=True)
+
+    async def fake_extract(path):
+        return Extraction(description=await ai.describe_image(b"", "p"), engine="vision")
+
+    monkeypatch.setattr(di, "extract", fake_extract)
+    stats = run(di.analyze_many(files))
+    assert stats.analyzed == 5 and not stats.errors
+    # blocco 1 (3 file) e blocco 2 (2 file): mai "text" tra "vision" e il rilascio del visivo
+    assert log == (["release-text"] + ["vision"] * 3 + ["release-vision"] + ["text"] * 3
+                   + ["release-text"] + ["vision"] * 2 + ["release-vision"] + ["text"] * 2)
+
+    log.clear()
+    monkeypatch.setenv("FI_LOW_MEMORY", "0")  # tanta memoria: nessun cambio di modello
+    run(di.analyze_many(files, force=True))
+    assert "release-text" not in log and "release-vision" not in log

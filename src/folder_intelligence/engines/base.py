@@ -82,6 +82,13 @@ class EngineStrategy(ABC):
     def close(self) -> None:
         """Libera le risorse (modelli in memoria)."""
 
+    def prefers_phases(self) -> bool:
+        """Per motori che servono sia testo sia immagini (es. il server): alternarli in indicizzazione?"""
+        return False
+
+    def release(self, capability: str) -> None:
+        """Libera la memoria del modello usato per `capability` (verrà ricaricato al bisogno)."""
+
     # ---------------------------------------------------------------- testo
     async def generate_json(self, prompt: str, system: str = "", schema: dict[str, Any] | None = None,
                             model: str | None = None) -> dict[str, Any]:

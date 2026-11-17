@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "folder-intelligence"
-version = "1.6.0"
+version = "1.7.0"
 description = "Trova duplicati e organizza le tue cartelle chattando con un'AI locale (llama.cpp o Ollama)."
 readme = "README.md"
 requires-python = ">=3.10"

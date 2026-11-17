@@ -61,6 +61,13 @@ class OllamaEngine(EngineStrategy):
     def describe(self) -> dict[str, Any]:
         return {**super().describe(), "url": self.base_url}
 
+    def release(self, capability: str) -> None:
+        from .llamacpp import ollama_unload
+
+        model = self.model_for(capability)
+        if model:
+            ollama_unload(model)
+
     async def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         import aiohttp
 

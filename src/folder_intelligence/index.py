@@ -80,6 +80,9 @@ STOPWORDS = {
     "nel", "nella", "nei", "nelle", "sul", "sulla", "e", "o", "che", "chi", "cui", "non", "mi",
     "ti", "si", "ci", "vi", "file", "files", "documento", "documenti", "trova", "cerca", "dove",
     "mostrami", "sono", "the", "of", "and", "a", "an", "to", "my", "miei", "mie", "mio", "mia",
+    # forme elise ("dell'albergo", anche scritte senza apostrofo): con la ricerca per prefisso
+    # "dell" troverebbe "della" in qualsiasi documento
+    "l", "dell", "dall", "nell", "sull", "all", "coll", "un", "quest", "quell", "d", "c", "s",
 }
 
 FIELDS = ("path", "name", "ext", "size", "mtime", "kind", "category", "title", "description",
@@ -274,11 +277,22 @@ class Index:
                           f"FROM docs {where}", args).fetchone()
         return {"documents": r["n"] or 0, "with_embedding": r["e"] or 0, "errors": r["err"] or 0}
 
-    def fts(self, query: str, root: Path | None = None, limit: int = 50) -> list[tuple[str, float, str]]:
-        terms = query_terms(query)
+    def fts(self, query: str, root: Path | None = None, limit: int = 50,
+            min_match: int = 1) -> list[tuple[str, float, str]]:
+        """Ricerca testuale. `min_match`: quante parole della richiesta devono comparire
+        nel documento (1 = basta una; ricerche precise: 2 su 3 ecc.)."""
+        terms = list(dict.fromkeys(query_terms(query)))[:8]
         if not terms:
             return []
-        match = " OR ".join(f'"{t}"*' for t in terms)
+        # prefisso solo per parole lunghe ("fattur" → fattura/fatture); le corte esatte
+        quoted = [f'"{t}"*' if len(t) >= 4 else f'"{t}"' for t in terms]
+        k = max(1, min(min_match, len(quoted)))
+        if k == 1:
+            match = " OR ".join(quoted)
+        else:
+            from itertools import combinations
+
+            match = " OR ".join("(" + " AND ".join(c) + ")" for c in combinations(quoted, k))
         sql = ("SELECT d.path, bm25(docs_fts, 8.0, 6.0, 4.0, 5.0, 1.0) AS score, "
                "snippet(docs_fts, 4, '«', '»', '…', 12) AS snip "
                "FROM docs_fts JOIN docs d ON d.id = docs_fts.rowid WHERE docs_fts MATCH ?")

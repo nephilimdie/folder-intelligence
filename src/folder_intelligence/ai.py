@@ -30,6 +30,14 @@ DEFAULT_ENGINE = os.environ.get("FI_ENGINE", "auto")
 DEFAULT_VISION_ENGINE = os.environ.get("FI_VISION_ENGINE", "auto")
 DEFAULT_EMBED_ENGINE = os.environ.get("FI_EMBED_ENGINE", "auto")
 AVAILABILITY_CACHE_SECONDS = 30
+LOW_MEMORY_GB = 32
+
+
+def total_memory_gb() -> float:
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2 ** 30
+    except (ValueError, OSError, AttributeError):
+        return 0.0
 
 
 class AIEngine:
@@ -122,6 +130,31 @@ class AIEngine:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return await self._need(EMBED).embed(texts)
 
+    async def release(self, capability: str) -> None:
+        """Libera il modello di una capacità (es. il modello di testo prima di leggere le immagini)."""
+        s = self.strategy(capability)
+        if s is not None:
+            import asyncio
+
+            await asyncio.to_thread(s.release, capability)
+
+    def swap_text_and_vision(self) -> bool:
+        """True se conviene non tenere in memoria insieme modello di testo e modello visivo:
+        motori diversi (es. llama.cpp + Ollama) su un Mac con poca memoria."""
+        text, vision = self.strategy(TEXT), self.strategy(VISION)
+        if text is None or vision is None:
+            return False
+        if text is vision:  # un solo motore: Ollama gestisce da sé la memoria, il server lo dice
+            return text.prefers_phases()
+        forced = os.environ.get("FI_LOW_MEMORY")
+        if forced is not None:
+            return forced not in ("0", "", "false")
+        return total_memory_gb() < LOW_MEMORY_GB
+
+    def forbid_remote(self) -> None:
+        if any(s is not None and s.name == "remote" for s in self.strategies.values()):
+            raise ValueError("il server non può usare se stesso come motore AI (--engine remote)")
+
     def close(self) -> None:
         for s in {id(s): s for s in self.strategies.values() if s}.values():
             s.close()
@@ -145,8 +178,18 @@ def _pick(requested: str, capability: str, model: str) -> str:
 def create_ai(engine: str = DEFAULT_ENGINE, vision_engine: str = DEFAULT_VISION_ENGINE,
               embed_engine: str = DEFAULT_EMBED_ENGINE, model: str = DEFAULT_OLLAMA_MODEL,
               vision_model: str = DEFAULT_VISION_MODEL, embed_model: str = DEFAULT_EMBED_MODEL,
-              ollama_url: str = DEFAULT_OLLAMA_URL) -> AIEngine:
-    """Costruisce la facciata scegliendo una strategia per capacità (una istanza per motore)."""
+              ollama_url: str = DEFAULT_OLLAMA_URL, allow_remote: bool = True) -> AIEngine:
+    """Costruisce la facciata scegliendo una strategia per capacità (una istanza per motore).
+
+    Con tutto su 'auto' e il server API locale acceso (`--serve`), usa i modelli del server
+    (`remote`): niente seconda copia in memoria. Il server stesso usa allow_remote=False."""
+    if allow_remote and all((e or "auto") == "auto" for e in (engine, vision_engine, embed_engine)):
+        from .engines.remote import RemoteEngine
+
+        if RemoteEngine.reachable():
+            remote = create_strategy("remote", model=model, vision_model=vision_model,
+                                     embed_model=embed_model)
+            return AIEngine(remote, remote, remote)
     # se l'utente sceglie un motore preciso (es. --engine ollama), vale anche per gli embedding
     embed_req = embed_engine if (embed_engine or "auto") != "auto" else engine
     names = {TEXT: _pick(engine, TEXT, model),

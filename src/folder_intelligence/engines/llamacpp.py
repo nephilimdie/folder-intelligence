@@ -39,7 +39,7 @@ atexit.register(close_all)
 
 IDLE_SECONDS = float(os.environ.get("FI_LLAMA_IDLE", "600"))
 N_CTX = int(os.environ.get("FI_LLAMA_CTX", "8192"))
-EMBED_CTX = 8192
+EMBED_CTX = int(os.environ.get("FI_LLAMA_EMBED_CTX", "2048"))  # come Ollama; BERT: tutto in un blocco
 N_BATCH = int(os.environ.get("FI_LLAMA_BATCH", "2048"))
 FLASH_ATTN = os.environ.get("FI_LLAMA_FLASH_ATTN", "1") != "0"
 MAX_EMBED_CHARS = 8000
@@ -258,6 +258,16 @@ class LlamaCppEngine(EngineStrategy):
 
         self._reaper = threading.Thread(target=reap, name="llamacpp-idle", daemon=True)
         self._reaper.start()
+
+    def release(self, capability: str) -> None:
+        embedding = capability == EMBED
+        with self._registry_lock:
+            for key, entry in list(self._loaded.items()):
+                if key[1] == embedding:
+                    with entry.lock:  # attende la fine di una generazione in corso
+                        del self._loaded[key]
+                        entry.llm.close()
+        gc.collect()
 
     def close(self) -> None:
         with self._registry_lock:
