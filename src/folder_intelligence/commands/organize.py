@@ -9,6 +9,7 @@ from .base import Command, CommandResult, Request
 
 class OrganizeCommand(Command):
     name = "organize"
+    group = "organizzazione"
     description = "Sposta i file in cartelle per categoria (con conferma e audit)"
     examples = ("organizza i file", "organizza in ~/Archivio")
     keywords = ("organizza", "riordina", "sistema", "metti in ordine", "smista", "sposta")

@@ -4,6 +4,8 @@ from .base import Command, Request
 
 class HelpCommand(Command):
     name = "help"
+    group = "sistema"
+    needs_folder = False
     description = "Mostra i comandi disponibili"
     examples = ("aiuto",)
     priority = 11

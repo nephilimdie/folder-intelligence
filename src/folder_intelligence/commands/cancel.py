@@ -4,6 +4,7 @@ from .base import Command, Request
 
 class CancelCommand(Command):
     name = "cancel"
+    group = "sistema"
     description = "Annulla l'operazione in attesa di conferma"
     priority = 13
     hidden = True

@@ -11,6 +11,7 @@ FILE_RE = r"([\w\-. ()]+\.[A-Za-z0-9]{2,5})\b"
 
 class DescribeCommand(Command):
     name = "describe"
+    group = "analisi"
     description = "Spiega cosa contiene un file (legge testo, immagini, PDF…)"
     examples = ("cosa contiene fattura.pdf?", "descrivi IMG_2041.HEIC")
     keywords = ("cosa contiene", "descrivi", "di cosa parla", "cos'e", "cosa c'e in", "cosa c'e nel",

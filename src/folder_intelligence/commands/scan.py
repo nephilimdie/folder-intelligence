@@ -5,6 +5,7 @@ from .summary import summary_text
 
 class ScanCommand(Command):
     name = "scan"
+    group = "analisi"
     description = "Analizza una cartella (veloce: solo nomi e dimensioni)"
     examples = ("analizza la cartella Downloads", "analizza ~/Desktop")
     keywords = ("analizza", "scansiona", "scan", "controlla", "guarda", "esamina")

@@ -7,6 +7,8 @@ from .base import Command, CommandResult, Request
 
 class UndoCommand(Command):
     name = "undo"
+    group = "organizzazione"
+    needs_folder = False
     description = "Ripristina l'ultima operazione o una specifica dello storico"
     examples = ("annulla l'ultima operazione", "annulla operazione 2")
     keywords = ("annulla l'ultima", "annulla ultima", "undo", "torna indietro", "ripristina")

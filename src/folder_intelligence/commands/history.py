@@ -5,6 +5,8 @@ from .base import Command, CommandResult
 
 class HistoryCommand(Command):
     name = "history"
+    group = "organizzazione"
+    needs_folder = False
     description = "Audit: storico di tutte le modifiche ai file"
     examples = ("mostra lo storico",)
     keywords = ("storico", "cronologia", "audit", "registro", "operazioni fatte", "operazioni eseguite",

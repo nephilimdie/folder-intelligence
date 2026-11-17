@@ -4,6 +4,8 @@ from .base import Command, Request
 
 class ExitCommand(Command):
     name = "exit"
+    group = "sistema"
+    needs_folder = False
     description = "Chiude la chat"
     examples = ("esci",)
     priority = 10

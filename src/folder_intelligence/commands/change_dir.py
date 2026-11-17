@@ -4,6 +4,7 @@ from .base import Command, CommandResult
 
 class ChangeDirCommand(Command):
     name = "change_dir"
+    group = "sistema"
     description = "Cambia la cartella di lavoro"
     examples = ("vai in ~/Documents",)
     keywords = ("vai in", "vai nella", "cambia cartella", "spostati", "apri la cartella", "usa la cartella", "cd ")

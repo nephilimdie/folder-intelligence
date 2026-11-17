@@ -4,6 +4,7 @@ from .base import Command
 
 class UnknownCommand(Command):
     name = "unknown"
+    group = "sistema"
     description = "Frase non riconosciuta"
     priority = 999
     hidden = True

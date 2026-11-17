@@ -5,6 +5,7 @@ from .base import Command, CommandResult
 
 class ClassifyCommand(Command):
     name = "classify"
+    group = "analisi"
     description = "Raggruppa i file per categoria"
     examples = ("classifica i file", "che file ci sono?")
     keywords = ("classifica", "categorie", "categorizza", "tipi di file", "che file ci sono", "cosa c'e")

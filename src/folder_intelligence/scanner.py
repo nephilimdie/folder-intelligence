@@ -92,7 +92,7 @@ def hash_file(path: Path, limit: int | None = None) -> str:
 
 # Nomi tipici delle copie: "foto copia", "foto copy 2", "Copia di foto", "foto (1)", "foto 2" (Finder)
 _COPY_RE = re.compile(
-    r"^(?:copia di|copy of)\s|[\s_-](?:copia|copy|kopie|copie)(?:\s*\d+)?$|\s\(\d+\)$|\s\d{1,2}$",
+    r"^(?:copia di|copy of)\s|[\s_-](?:copia|copy|kopie|copie)(?:\s*\d+)?$|\s?\(\d+\)$|\s\d{1,2}$",
     re.IGNORECASE)
 # Cartelle dove di solito finiscono le copie "di passaggio"
 _TRANSIENT_DIRS = {"downloads", "download", "scaricati", "desktop", "scrivania", "tmp", "temp"}

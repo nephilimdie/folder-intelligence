@@ -14,7 +14,9 @@ from typing import Callable, NoReturn
 from . import __version__, completion, exporter
 from . import history as enc_history
 from .assistant import Assistant
-from .ai import DEFAULT_EMBED_MODEL, DEFAULT_VISION_MODEL, AIEngine
+from .ai import (DEFAULT_EMBED_ENGINE, DEFAULT_EMBED_MODEL, DEFAULT_ENGINE, DEFAULT_VISION_ENGINE,
+                 DEFAULT_VISION_MODEL, create_ai)
+from .engines import ENGINES
 from .classifier import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL
 from .intents import Intent
 from .mcp_memory import MODES, McpMemory
@@ -204,7 +206,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=8765, help="porta API (default 8765)")
     p.add_argument("--memory", default="json", choices=["json", "inmemory", "lightrag"], help="backend memoria")
     p.add_argument("--no-ai", action="store_true", help="non usare Ollama")
-    p.add_argument("--model", default=DEFAULT_OLLAMA_MODEL, help=f"modello Ollama testuale (default {DEFAULT_OLLAMA_MODEL})")
+    p.add_argument("--model", default=DEFAULT_OLLAMA_MODEL, help=f"modello testuale: nome Ollama (es. qwen2.5:14b, riusato anche da llama.cpp) o file .gguf "
+                        f"(default {DEFAULT_OLLAMA_MODEL})")
+    engines = ["auto", *ENGINES]
+    p.add_argument("--engine", choices=engines, default=DEFAULT_ENGINE,
+                   help="motore AI per testo e router: auto (llama.cpp se disponibile, altrimenti Ollama), "
+                        "llamacpp (dentro l'app), ollama, mlx")
+    p.add_argument("--vision-engine", choices=engines, default=DEFAULT_VISION_ENGINE,
+                   help="motore per le immagini (auto = Ollama)")
+    p.add_argument("--embed-engine", choices=engines, default=DEFAULT_EMBED_ENGINE,
+                   help="motore per gli embedding della ricerca semantica (auto = come --engine)")
+    p.add_argument("--router", choices=["ai", "rules"], default=None,
+                   help="come interpretare le frasi: ai (default, piano di comandi deciso dal modello) o rules")
+    p.add_argument("--router-model", default=None,
+                   help="modello per interpretare le frasi (default = --model; es. qwen2.5:7b, più veloce)")
     p.add_argument("--vision-model", default=DEFAULT_VISION_MODEL, help=f"modello per immagini (default {DEFAULT_VISION_MODEL})")
     p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL, help=f"modello embedding (default {DEFAULT_EMBED_MODEL})")
     p.add_argument("--no-vision", action="store_true", help="non usare il modello visivo (più veloce)")
@@ -217,13 +232,28 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def build_ai(args: argparse.Namespace):
+    return create_ai(engine=args.engine, vision_engine=args.vision_engine, embed_engine=args.embed_engine,
+                     model=args.model, vision_model=args.vision_model, embed_model=args.embed_model,
+                     ollama_url=args.ollama_url)
+
+
+async def ai_state_line(ai) -> str:
+    if not ai:
+        return "disattivata"
+    if await ai.is_available():
+        return f"attiva — {ai.summary()}"
+    return f"non disponibile ({ai.model}, {ai.engine_of('text')}): {ai.why_unavailable('text')}"
+
+
 def make_assistant(args: argparse.Namespace, progress: ProgressDisplay) -> Assistant:
-    ai = None if args.no_ai else AIEngine(args.ollama_url, args.model, args.vision_model, args.embed_model)
+    ai = None if args.no_ai else build_ai(args)
     return Assistant(
         args.directory, memory=create_memory(args.memory), ollama=ai,
         use_ai=not args.no_ai, ai_limit=args.ai_limit, status=status,
         source="cli", progress=progress, use_vision=not args.no_vision,
         index_limit=args.index_limit, mcp=McpMemory(args.mcp_mode),
+        router_model=args.router_model, router_mode=args.router,
     )
 
 
@@ -287,10 +317,7 @@ async def run_batch(args: argparse.Namespace, assistant: Assistant, progress: Pr
 async def header_lines(assistant: Assistant) -> list[str]:
     from . import crypto
 
-    ai_state = "disattivata"
-    if assistant.ai:
-        ai_state = (f"attiva ({assistant.ai.model})" if await assistant.ai.is_available()
-                    else f"non disponibile — avvia `ollama serve` e `ollama pull {assistant.ai.model}`")
+    ai_state = await ai_state_line(assistant.ai)
     try:
         crypto.master_key()
         sec = f"🔐 dati dell'app cifrati (AES-256-GCM, chiave in: {crypto.key_location()})"
@@ -315,10 +342,7 @@ async def run_tui(assistant: Assistant, mouse: bool = True) -> int:
 
 
 async def run_chat(assistant: Assistant, progress: ProgressDisplay) -> int:
-    ai_state = "disattivata"
-    if assistant.ollama:
-        ai_state = (f"attiva ({assistant.ollama.model})" if await assistant.ollama.is_available()
-                    else f"non disponibile — avvia `ollama serve` e `ollama pull {assistant.ollama.model}`")
+    ai_state = await ai_state_line(assistant.ai)
     from . import crypto
 
     try:
@@ -475,9 +499,8 @@ def _main(argv: list[str] | None = None) -> int:
 
         if args.mcp_mode:
             os.environ["FI_MCP_MODE"] = args.mcp_mode
-        return serve(args.host, args.port, model=args.model, ollama_url=args.ollama_url,
-                     use_ai=not args.no_ai, memory=args.memory, vision_model=args.vision_model,
-                     embed_model=args.embed_model, use_vision=not args.no_vision)
+        return serve(args.host, args.port, ai=None if args.no_ai else build_ai(args),
+                     memory=args.memory, use_vision=not args.no_vision)
 
     directory = Path(args.directory).expanduser()
     if not directory.is_dir() and not (args.undo or args.history):

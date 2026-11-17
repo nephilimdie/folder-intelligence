@@ -7,6 +7,7 @@ from .base import Command, CommandResult, Request
 
 class ConfirmCommand(Command):
     name = "confirm"
+    group = "sistema"
     description = "Conferma l'operazione in attesa"
     priority = 12
     hidden = True

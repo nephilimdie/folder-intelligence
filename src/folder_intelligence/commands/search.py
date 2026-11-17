@@ -7,6 +7,7 @@ from .base import Command, CommandResult, Request
 
 class SearchCommand(Command):
     name = "search"
+    group = "ricerca"
     description = "Cerca file per nome, contenuto e significato (anche immagini e PDF analizzati)"
     examples = ("cerca la ricevuta dell'hotel di Roma", "trova le foto della spiaggia")
     priority = 40

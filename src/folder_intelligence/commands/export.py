@@ -5,6 +5,7 @@ from .base import Command, CommandResult, Request
 
 class ExportCommand(Command):
     name = "export"
+    group = "analisi"
     description = "Salva un report della cartella (md, json, csv)"
     examples = ("esporta il report in csv",)
     keywords = ("esporta", "export", "salva report", "salva il report", "report")

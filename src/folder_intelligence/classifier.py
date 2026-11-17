@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 from pathlib import Path
@@ -114,75 +113,9 @@ def _pdf_preview(path: Path, max_chars: int) -> str:
     return ""
 
 
-class OllamaClient:
-    """Client minimale per l'API HTTP di Ollama."""
+from .engines.base import parse_json  # noqa: E402
 
-    def __init__(self, base_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_OLLAMA_MODEL,
-                 timeout: float = 120.0):
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.timeout = timeout
-        self._available: bool | None = None
-
-    async def is_available(self) -> bool:
-        """True se il server risponde e il modello è installato."""
-        if self._available is not None:
-            return self._available
-        import aiohttp
-
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as s:
-                async with s.get(f"{self.base_url}/api/tags") as r:
-                    if r.status != 200:
-                        self._available = False
-                    else:
-                        data = await r.json()
-                        names = {m.get("name") for m in data.get("models", [])}
-                        self._available = self.model in names or f"{self.model}:latest" in names
-        except Exception:
-            self._available = False
-        return self._available
-
-    async def generate_json(self, prompt: str, system: str = "") -> dict[str, Any]:
-        import aiohttp
-
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "system": system,
-            "format": "json",
-            "stream": False,
-            "think": False,
-            "options": {"temperature": 0},
-        }
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as s:
-            async with s.post(f"{self.base_url}/api/generate", json=payload) as r:
-                r.raise_for_status()
-                data = await r.json()
-        return _parse_json(data.get("response", ""))
-
-    async def chat(self, messages: list[dict[str, str]]) -> str:
-        import aiohttp
-
-        payload = {"model": self.model, "messages": messages, "stream": False, "think": False}
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as s:
-            async with s.post(f"{self.base_url}/api/chat", json=payload) as r:
-                r.raise_for_status()
-                data = await r.json()
-        return data.get("message", {}).get("content", "").strip()
-
-
-def _parse_json(text: str) -> dict[str, Any]:
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        m = re.search(r"\{.*\}", text or "", re.S)
-        if m:
-            try:
-                return json.loads(m.group(0))
-            except json.JSONDecodeError:
-                pass
-    return {}
+_parse_json = parse_json  # compatibilità
 
 
 _CLASSIFY_SYSTEM = (
@@ -195,7 +128,7 @@ _CLASSIFY_SYSTEM = (
 class FileClassifier:
     """Combina regole e (se disponibile) Ollama sul contenuto testuale."""
 
-    def __init__(self, ollama: OllamaClient | None = None, concurrency: int = 2):
+    def __init__(self, ollama: Any = None, concurrency: int = 2):
         self.rules = RuleClassifier()
         self.ollama = ollama
         self.concurrency = concurrency

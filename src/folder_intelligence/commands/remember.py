@@ -6,6 +6,8 @@ from .base import Command, Request
 
 class RememberCommand(Command):
     name = "remember"
+    group = "memoria"
+    needs_folder = False
     description = "Salva una nota nella memoria persistente"
     examples = ("ricordami di sistemare le foto",)
     keywords = ("ricordami", "ricorda che", "ricordati che", "prendi nota", "annota")

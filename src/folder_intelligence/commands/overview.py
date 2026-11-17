@@ -10,6 +10,7 @@ MAX_DOCS = 80
 
 class OverviewCommand(Command):
     name = "overview"
+    group = "analisi"
     description = "Riassunto dei contenuti di una cartella: temi, tipi di documenti, periodi, cose importanti"
     examples = ("cosa contiene la cartella Documents, fammi un riassunto", "riassumi il contenuto della cartella")
     priority = 29

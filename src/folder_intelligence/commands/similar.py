@@ -15,6 +15,7 @@ SHOW_FILES = 6
 
 class SimilarCommand(Command):
     name = "similar"
+    group = "analisi"
     description = ("Trova foto e documenti simili ma non identici (foto ridimensionate o ripetute, "
                    "stesso documento in formati o versioni diverse)")
     examples = ("trova foto simili", "trova elementi simili in Documents", "ci sono documenti quasi uguali?")

@@ -5,6 +5,7 @@ from .base import Command, CommandResult, Request
 
 class LargestCommand(Command):
     name = "largest"
+    group = "analisi"
     description = "Elenca i file più grandi (istantaneo: non legge i file)"
     examples = ("mostrami i 10 file più grandi",)
     keywords = ("piu grandi", "piu pesanti", "grossi", "ingombranti", "occupano piu")

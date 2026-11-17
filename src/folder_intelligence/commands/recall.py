@@ -4,6 +4,8 @@ from .base import Command, CommandResult
 
 class RecallCommand(Command):
     name = "recall"
+    group = "memoria"
+    needs_folder = False
     description = "Mostra ciò che ricordo (note e operazioni passate)"
     examples = ("cosa ricordi?",)
     keywords = ("cosa ricordi", "memoria", "ricordi", "cosa abbiamo fatto")

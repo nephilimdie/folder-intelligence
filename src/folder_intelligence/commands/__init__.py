@@ -55,13 +55,20 @@ class CommandRegistry:
             args.update(query=str(q), text=str(q))
         return Intent(name, path=path, args=args)
 
+    GROUP_TITLES = {"analisi": "🔍 Analisi", "ricerca": "🧠 Ricerca nei contenuti",
+                    "organizzazione": "🗂️  Pulizia e organizzazione", "memoria": "📝 Memoria",
+                    "sistema": "⚙️  Sistema", "altro": "🧩 Altro"}
+
     def help_text(self) -> str:
-        lines = ["Ecco cosa posso fare (scrivi in linguaggio naturale):"]
-        for c in sorted(self.commands, key=lambda c: (c.name in ("help", "exit"), c.priority)):
-            if c.hidden or not c.examples:
-                continue
-            lines.append(f"\n  • {c.description}")
-            lines.append("      " + "  ·  ".join(f'"{e}"' for e in c.examples[:2]))
+        lines = ["Ecco cosa posso fare (scrivi in linguaggio naturale, anche più richieste insieme:",
+                 "\"indicizza Documents e poi trova i documenti simili\"):"]
+        order = list(self.GROUP_TITLES)
+        visible = [c for c in self.commands if not c.hidden and c.examples]
+        for group in sorted({c.group for c in visible}, key=lambda g: order.index(g) if g in order else 99):
+            lines.append(f"\n{self.GROUP_TITLES.get(group, group)}")
+            for c in (c for c in visible if c.group == group):
+                lines.append(f"  • {c.description}")
+                lines.append("      " + "  ·  ".join(f'"{e}"' for e in c.examples[:2]))
         lines.append("\nTab completa cartelle e comandi · ↑/↓ comandi precedenti · Ctrl+C interrompe")
         return "\n".join(lines)
 

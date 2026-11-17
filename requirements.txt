@@ -5,3 +5,4 @@ cryptography>=42
 keyring>=25
 fastapi>=0.110
 uvicorn[standard]>=0.27
+llama-cpp-python>=0.3.37

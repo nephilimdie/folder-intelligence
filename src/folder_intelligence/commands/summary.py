@@ -5,6 +5,7 @@ from .base import Command, CommandResult
 
 class SummaryCommand(Command):
     name = "summary"
+    group = "analisi"
     description = "Riepilogo della cartella: file, spazio, categorie"
     examples = ("riepilogo", "quanto spazio occupa?")
     keywords = ("riepilogo", "statistiche", "quanto spazio", "sommario", "panoramica", "stato")

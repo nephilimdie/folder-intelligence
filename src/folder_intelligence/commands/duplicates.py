@@ -26,6 +26,7 @@ def _note(g, f) -> str:
 
 class DuplicatesCommand(Command):
     name = "duplicates"
+    group = "analisi"
     description = "Trova i file duplicati (stesso contenuto)"
     examples = ("trovami i duplicati", "ci sono doppioni nella cartella Downloads?")
     keywords = DUP_WORDS
@@ -58,6 +59,7 @@ class DuplicatesCommand(Command):
 
 class DedupeCommand(Command):
     name = "dedupe"
+    group = "organizzazione"
     description = "Sposta nel Cestino le copie duplicate (con conferma e audit)"
     examples = ("cancella i duplicati",)
     priority = 30

@@ -4,6 +4,7 @@ from .base import Command, CommandResult, Request
 
 class IndexCommand(Command):
     name = "index"
+    group = "ricerca"
     description = "Legge e comprende il contenuto dei file (testo, PDF, immagini, Office, audio/video)"
     examples = ("indicizza la cartella", "analizza il contenuto dei file")
     keywords = ("indicizza", "indicizzare", "analizza il contenuto", "analizza i contenuti", "leggi i file",

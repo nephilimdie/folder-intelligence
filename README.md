@@ -2,7 +2,7 @@
 
 Parla con le tue cartelle: trova file duplicati, **comprende il contenuto** di documenti,
 PDF (anche scansionati), immagini, Office, audio e video, li cerca per significato e li
-organizza. Tutto con AI locale (Ollama): nessun dato lascia il Mac.
+organizza. Tutto con AI locale (llama.cpp dentro l'app e/o Ollama): nessun dato lascia il Mac.
 
 ## Installazione
 
@@ -15,8 +15,10 @@ python3 -m venv .venv
 AI locale (opzionale, consigliata):
 
 ```bash
-ollama serve                 # se non è già attivo
-ollama pull qwen2.5:14b      # modello di default; cambialo con --model o FI_OLLAMA_MODEL
+pip install llama-cpp-python # motore dentro l'app per testo e ricerca (vedi "Motori AI")
+ollama pull qwen2.5:14b      # scarica i modelli (llama.cpp riusa gli stessi file)
+ollama pull bge-m3
+ollama pull qwen3.5:9b       # immagini: serve `ollama serve` attivo
 ```
 
 Modelli usati (tutti opzionali, configurabili con `--model`, `--vision-model`, `--embed-model`):
@@ -29,7 +31,7 @@ Modelli usati (tutti opzionali, configurabili con `--model`, `--vision-model`, `
 
 Strumenti di sistema usati se presenti: `tesseract` (OCR), `pdftotext`/`pdftoppm` (poppler),
 `ffprobe`/`ffmpeg`, `sips`, `textutil`, `mdls`/`mdfind` (Spotlight).
-Senza Ollama tutto funziona lo stesso: si usano regole, OCR e ricerca testuale.
+Senza AI tutto funziona lo stesso: si usano regole, OCR e ricerca testuale.
 
 ## Uso
 
@@ -99,9 +101,70 @@ Comandi (linguaggio naturale, scrivi `aiuto` in chat):
 | `ricordami di …`, `cosa ricordi?` | memoria persistente |
 | `vai in ~/Documents` | cambia cartella di lavoro |
 
-Frasi non riconosciute dalle regole vengono interpretate da Ollama, se disponibile.
+Le frasi vengono interpretate dall'AI locale (vedi 'Come capisce le richieste').
 
-### Modalità batch (senza chat)
+### Motori AI (strategy pattern)
+
+Il codice parla solo con una facciata (`ai.AIEngine`); sotto, ogni capacità usa un **motore**
+intercambiabile (`engines/`):
+
+| Motore | Testo / router | Embedding | Immagini | Note |
+|---|---|---|---|---|
+| `llamacpp` | ✅ | ✅ | — | dentro l'app (llama-cpp-python, GPU Metal); JSON vincolato da grammatica |
+| `ollama` | ✅ | ✅ | ✅ | servizio esterno `ollama serve` |
+| `mlx` | predisposto | predisposto | predisposto | non ancora implementato |
+
+Predefinito (`auto`): **testo e embedding con llama.cpp** se installato e se il modello è
+disponibile, **immagini con Ollama**. Per scegliere: `--engine llamacpp|ollama|mlx|auto`,
+`--vision-engine …`, `--embed-engine …` (o `FI_ENGINE`, `FI_VISION_ENGINE`, `FI_EMBED_ENGINE`).
+
+llama.cpp **riusa i modelli già scaricati con Ollama** (`qwen2.5:14b`, `qwen2.5:7b`, `bge-m3`:
+nessun nuovo download) oppure un file `.gguf` qualsiasi (`--model ~/modelli/x.gguf`). I modelli
+salvati da Ollama nel formato a tensori separati (es. `qwen3.5:9b`) non sono leggibili da llama.cpp:
+per questo le immagini restano su Ollama. Gli embedding sono identici a quelli di Ollama
+(similarità 1.0), quindi l'indice esistente resta valido.
+
+Memoria: i modelli si caricano al primo uso e si liberano dopo 10 minuti di inattività
+(`FI_LLAMA_IDLE`). Se Ollama tiene in memoria la stessa copia del modello, viene liberata
+(Ollama la ricarica da solo se serve); se la GPU è piena, llama.cpp libera i modelli di Ollama e
+riprova una volta (`FI_LLAMA_FREE_OLLAMA=0` per disattivare). Altre opzioni: `FI_LLAMA_CTX`
+(contesto, 8192), `FI_LLAMA_BATCH` (2048), `FI_LLAMA_FLASH_ATTN` (1).
+
+Installazione: `pip install llama-cpp-python` (si compila con Metal in qualche minuto).
+
+**Aggiungere un motore:** crea `engines/<nome>.py` con una sottoclasse di `EngineStrategy`
+(`generate_json`, `chat`, `describe_image`, `embed`, `available`) e registrala in
+`engines/__init__.py`. `GET /status` mostra quale motore serve ogni capacità.
+
+## Come capisce le richieste (router AI)
+
+Ogni frase passa da un **router**: l'AI locale riceve l'elenco dei comandi (raggruppati in
+analisi, ricerca, organizzazione, memoria, sistema, con i loro argomenti) e restituisce un **piano**
+di 1-4 passi, vincolato da uno schema JSON. Esempi:
+
+| Frase | Piano |
+|---|---|
+| `indicizza Documents e poi trova i documenti simili` | `index ~/Documents` → `similar ~/Documents (documents)` |
+| `quanto spazio sprecano i doppioni nei download? poi esporta un report csv` | `duplicates ~/Downloads` → `export csv` |
+| `ho fatto casino, rimetti tutto come prima` | `undo` |
+| `che differenza c'è tra jpg e png?` | nessun comando: risponde l'AI |
+| `rinomina tutte le foto con la data` | nessun comando: spiega che non può e cosa può fare |
+
+Garanzie:
+- comandi inesistenti e argomenti non validi vengono scartati; l'AI non può inventare comandi;
+- al massimo **un** comando che modifica file per richiesta, sempre **per ultimo**, sempre con conferma;
+- se un passo chiede una conferma (es. "prima devo indicizzare: procedo?") il piano si ferma e
+  riprende dopo il "sì"; una nuova richiesta lo annulla;
+- un passo senza cartella usa quella del passo precedente;
+- scorciatoie senza AI (immediate): sì/no, esci, aiuto, annulla, vai in…, cronologia;
+- se il motore AI non è disponibile o non risponde entro 25s si usano le regole a parole chiave.
+
+Opzioni: `--router rules` (solo parole chiave), `--router-model qwen2.5:7b` (più veloce, meno preciso; funziona con qualsiasi motore;
+anche `FI_ROUTER_MODEL`). API: `POST /route {"message": …}` mostra il piano **senza** eseguirlo;
+`POST /chat` lo esegue e restituisce `data.route` e i risultati di ogni passo in `data.steps`.
+Nuovi comandi entrano automaticamente nel catalogo del router: basta `description`, `group`, `params`.
+
+## Modalità batch (senza chat)
 
 ```bash
 python3 __main__.py ~/Downloads --duplicates                 # elenca duplicati

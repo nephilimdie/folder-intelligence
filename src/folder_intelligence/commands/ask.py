@@ -7,6 +7,7 @@ QUESTION_START = ("quanto", "quanti", "quante", "quando", "quale", "quali", "chi
 
 class AskCommand(Command):
     name = "ask"
+    group = "ricerca"
     description = "Risponde a domande sul contenuto dei tuoi documenti, citando i file"
     examples = ("quanto ho pagato l'hotel a Roma?", "quando scade il contratto d'affitto?")
     priority = 45

@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable
 
 from . import organizer
 from .ai import AIEngine
-from .classifier import FileClassifier, OllamaClient
+from .classifier import FileClassifier
 from .commands import CommandRegistry, CommandResult, registry
 from .intelligence import DocumentIntelligence
 from .intents import Intent
@@ -49,7 +49,7 @@ class Assistant:
         self,
         directory: str | Path,
         memory: MemoryStrategy | None = None,
-        ollama: OllamaClient | None = None,
+        ollama: AIEngine | None = None,
         use_ai: bool = True,
         ai_limit: int = 50,
         status: Callable[[str], None] | None = None,
@@ -61,10 +61,12 @@ class Assistant:
         index_limit: int = 200,
         commands: CommandRegistry | None = None,
         mcp: "McpMemory | None" = None,
+        router_model: str | None = None,
+        router_mode: str | None = None,
     ) -> None:
         self.directory = Path(directory).expanduser().resolve()
         self.memory = memory or create_memory("json")
-        self.ai: AIEngine | OllamaClient | None = ollama if use_ai else None
+        self.ai: AIEngine | None = ollama if use_ai else None
         self.ollama = self.ai  # compatibilità
         self.use_ai = use_ai
         self.ai_limit = ai_limit
@@ -81,6 +83,11 @@ class Assistant:
         self.history: list[dict[str, str]] = []
         self.cancel = threading.Event()
         self.mcp = mcp if mcp is not None else McpMemory()
+        from .router import Router
+
+        self.router = Router(self.registry, self.ai if use_ai else None, model=router_model,
+                             mode=router_mode if use_ai else "rules")
+        self.plan_rest: list[Intent] = []   # passi del piano che attendono una risposta sì/no
 
     # ------------------------------------------------------------- servizi ctx
     def resolve(self, path: Path | None) -> Path:
@@ -206,8 +213,9 @@ class Assistant:
         avanzamento propri; cache delle scansioni, indice, AI e memoria condivisi."""
         child = copy.copy(self)
         child.pending = None
+        child.plan_rest = []
         child.cancel = threading.Event()
-        child.history = []
+        # cronologia condivisa: il router capisce i riferimenti ("e in Downloads?")
         child.progress = progress
         if status is not None:
             child.status = status
@@ -215,18 +223,74 @@ class Assistant:
 
     # --------------------------------------------------------------- dispatch
     async def handle(self, text: str) -> CommandResult:
-        """Interpreta ed esegue una frase; restituisce testo (+ `.data` strutturati)."""
+        """Interpreta ed esegue una frase: il router (AI + regole) produce un piano di 1-4
+        comandi, eseguiti in ordine. Restituisce testo (+ `.data` strutturati)."""
         self.cancel.clear()
-        intent = self.registry.parse(text)
-        if intent.type == "unknown" and not self.pending:
-            intent = await self._llm_intent(text) or intent
+        plan = await self.router.route(text, self)
+        first = plan.steps[0].type if plan.steps else "chat"
         # una domanda sì/no vale solo per la risposta immediatamente successiva
-        if isinstance(self.pending, PendingAction) and intent.type not in ("confirm", "cancel", "unknown"):
+        if self.pending is not None and isinstance(self.pending, PendingAction) \
+                and first not in ("confirm", "cancel", "unknown"):
             self.pending = None
+        if first not in ("confirm", "cancel"):
+            self.plan_rest = []
         self.history.append({"role": "user", "content": text})
-        reply = await self.run_intent(intent)
+
+        if not plan.steps:
+            reply = CommandResult(plan.reply, {"command": "chat"})
+        else:
+            rest = self.plan_rest if first == "confirm" else []
+            if first == "cancel":
+                self.plan_rest = []
+            reply = await self.run_plan(plan.steps)
+            if rest and self.pending is None and not reply.data.get("cancelled"):
+                # la risposta "sì" ha sbloccato il piano: proseguiamo con i passi rimasti
+                self.plan_rest = []
+                more = await self.run_plan(rest, offset=1)
+                reply = CommandResult(f"{reply}\n\n{more}",
+                                      {**more.data, "before": reply.data})
+        reply.data["route"] = plan.to_dict()
         self.history.append({"role": "assistant", "content": reply})
         return reply
+
+    async def run_plan(self, steps: list[Intent], offset: int = 0) -> CommandResult:
+        """Esegue i passi in ordine nello stesso contesto. Si ferma se un passo fallisce, viene
+        interrotto o chiede una conferma (i passi restanti ripartono dopo il 'sì')."""
+        from .router import describe_step
+
+        if len(steps) == 1 and not offset:
+            return await self.run_intent(steps[0])
+        labels = [describe_step(s, self.registry) for s in steps]
+        out: list[str] = []
+        if not offset:
+            out.append("🧭 Farò, in ordine:\n" + "\n".join(f"  {i}. {lbl}" for i, lbl in enumerate(labels, 1)))
+        results: list[dict[str, Any]] = []
+        for i, step in enumerate(steps):
+            if self.cancel.is_set():
+                break
+            n = f"{i + 1}/{len(steps)}" if not offset else "→"
+            self.status(f"Passo {n}: {labels[i]} …")
+            res = await self.run_intent(step)
+            out.append(f"── {n} · {labels[i]}\n{res}")
+            results.append(res.data)
+            if res.data.get("cancelled") or res.data.get("error"):
+                if i < len(steps) - 1:
+                    out.append("Mi fermo qui: i passi successivi non sono stati eseguiti.")
+                break
+            if self.pending is not None and i < len(steps) - 1:
+                self.plan_rest = steps[i + 1:]
+                note = "Dopo la tua risposta proseguo con: " + ", ".join(labels[i + 1:]) + "."
+                # la domanda (sì/no) deve restare l'ultima riga: la nota va subito prima
+                lines = out[-1].splitlines()
+                q = max((k for k, line in enumerate(lines) if "(sì/no)" in line), default=len(lines))
+                out[-1] = "\n".join(lines[:q] + [note] + lines[q:])
+                break
+        data: dict[str, Any] = {"command": "plan", "steps": results}
+        if results:
+            data["last"] = results[-1]
+            if results[-1].get("cancelled"):
+                data["cancelled"] = True
+        return CommandResult("\n\n".join(out), data)
 
     async def run_intent(self, intent: Intent) -> CommandResult:
         """Esegue un comando già interpretato (usato anche dalle API), con errori gestiti."""
@@ -242,16 +306,6 @@ class Assistant:
                 f"Permesso negato: {e.filename or e}. Su macOS concedi 'Accesso completo al disco' "
                 "al Terminale (Impostazioni → Privacy e sicurezza).", {"error": "permission_denied"})
         return reply
-
-    async def _llm_intent(self, text: str) -> Intent | None:
-        if not (self.use_ai and self.ai and await self.ai.is_available()):
-            return None
-        try:
-            data = await self.ai.generate_json(text, system=self.registry.llm_system_prompt())
-        except Exception:
-            return None
-        intent = self.registry.from_llm(data)
-        return intent if intent.type != "unknown" else None
 
     async def dispatch(self, intent: Intent, text: str = "") -> CommandResult:
         cmd = self.registry.get(intent.type) or self.registry.get("unknown")

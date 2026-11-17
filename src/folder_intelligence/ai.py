@@ -1,85 +1,163 @@
-"""Motore AI locale (Ollama): testo, visione ed embedding.
+"""Motore AI dell'app: facciata (Context dello strategy pattern) sopra uno o più motori.
 
-Tre modelli distinti, ciascuno opzionale:
-- `model`        → ragionamento/JSON (default qwen2.5:14b)
-- `vision_model` → descrizione/lettura immagini (default qwen3.5:9b)
-- `embed_model`  → vettori per la ricerca semantica (default bge-m3)
+Tre capacità, ognuna servita da una strategia (vedi `engines/`):
+- testo     → ragionamento, JSON, router dei comandi (default qwen2.5:14b)
+- immagini  → descrizione/lettura immagini (default qwen3.5:9b)
+- embedding → vettori per la ricerca semantica (default bge-m3)
+
+Esempio (predefinito se llama.cpp è installato e i modelli GGUF ci sono):
+    testo + embedding con llama.cpp dentro l'app, immagini con Ollama.
+
+Il resto del codice usa solo questa facciata (`ai.generate_json`, `ai.describe_image`, …) e non
+sa quale motore c'è sotto: cambiare motore = cambiare configurazione (`--engine`, `FI_ENGINE`).
 """
 
 from __future__ import annotations
 
-import base64
 import os
+import time
 from pathlib import Path
 from typing import Any
 
-from .classifier import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, OllamaClient, _parse_json
+from .classifier import DEFAULT_OLLAMA_MODEL
+from .engines import ENGINES, create_strategy
+from .engines.base import EMBED, TEXT, VISION, EngineStrategy, EngineUnsupported
+from .engines.ollama import DEFAULT_URL as DEFAULT_OLLAMA_URL
 
 DEFAULT_VISION_MODEL = os.environ.get("FI_VISION_MODEL", "qwen3.5:9b")
 DEFAULT_EMBED_MODEL = os.environ.get("FI_EMBED_MODEL", "bge-m3")
+DEFAULT_ENGINE = os.environ.get("FI_ENGINE", "auto")
+DEFAULT_VISION_ENGINE = os.environ.get("FI_VISION_ENGINE", "auto")
+DEFAULT_EMBED_ENGINE = os.environ.get("FI_EMBED_ENGINE", "auto")
+AVAILABILITY_CACHE_SECONDS = 30
 
 
-class AIEngine(OllamaClient):
-    def __init__(self, base_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_OLLAMA_MODEL,
-                 vision_model: str = DEFAULT_VISION_MODEL, embed_model: str = DEFAULT_EMBED_MODEL,
-                 timeout: float = 180.0):
-        super().__init__(base_url, model, timeout)
-        self.vision_model = vision_model
-        self.embed_model = embed_model
-        self._models: set[str] | None = None
+class AIEngine:
+    """Facciata: inoltra ogni richiesta alla strategia scelta per quella capacità."""
 
-    async def models(self) -> set[str]:
-        if self._models is None:
-            import aiohttp
+    def __init__(self, text: EngineStrategy | None, vision: EngineStrategy | None = None,
+                 embed: EngineStrategy | None = None) -> None:
+        self.strategies: dict[str, EngineStrategy | None] = {TEXT: text, VISION: vision, EMBED: embed}
+        self._cache: dict[str, tuple[float, bool]] = {}
 
-            try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as s:
-                    async with s.get(f"{self.base_url}/api/tags") as r:
-                        data = await r.json() if r.status == 200 else {}
-                self._models = {m.get("name", "") for m in data.get("models", [])}
-            except Exception:
-                self._models = set()
-        return self._models
+    # ------------------------------------------------------------ descrizione
+    def strategy(self, capability: str) -> EngineStrategy | None:
+        return self.strategies.get(capability)
 
-    async def has(self, model: str | None) -> bool:
-        if not model:
-            return False
-        names = await self.models()
-        return model in names or f"{model}:latest" in names
+    @property
+    def model(self) -> str:
+        s = self.strategy(TEXT)
+        return s.model if s else ""
 
-    async def is_available(self) -> bool:  # modello testuale
-        return await self.has(self.model)
+    @property
+    def vision_model(self) -> str:
+        s = self.strategy(VISION)
+        return s.vision_model if s else ""
+
+    @property
+    def embed_model(self) -> str:
+        s = self.strategy(EMBED)
+        return s.embed_model if s else ""
+
+    def engine_of(self, capability: str) -> str:
+        s = self.strategy(capability)
+        return s.label if s else "—"
+
+    def summary(self) -> str:
+        """'qwen2.5:14b (llama.cpp) · immagini qwen3.5:9b (Ollama) · ricerca bge-m3 (llama.cpp)'"""
+        parts = []
+        for cap, label in ((TEXT, ""), (VISION, "immagini "), (EMBED, "ricerca ")):
+            s = self.strategy(cap)
+            if s:
+                parts.append(f"{label}{s.model_for(cap)} ({s.label})")
+        return " · ".join(parts)
+
+    def describe(self) -> dict[str, Any]:
+        return {cap: ({"engine": s.name, "label": s.label, "model": s.model_for(cap)} if s else None)
+                for cap, s in self.strategies.items()}
+
+    def why_unavailable(self, capability: str = TEXT) -> str:
+        s = self.strategy(capability)
+        return s.why_unavailable(capability) if s else "nessun motore configurato"
+
+    # ------------------------------------------------------------ disponibilità
+    async def _available(self, capability: str) -> bool:
+        cached = self._cache.get(capability)
+        if cached and time.monotonic() - cached[0] < AVAILABILITY_CACHE_SECONDS:
+            return cached[1]
+        s = self.strategy(capability)
+        try:
+            ok = bool(s) and await s.available(capability)  # type: ignore[union-attr]
+        except Exception:
+            ok = False
+        self._cache[capability] = (time.monotonic(), ok)
+        return ok
+
+    async def is_available(self) -> bool:
+        return await self._available(TEXT)
 
     async def can_see(self) -> bool:
-        return await self.has(self.vision_model)
+        return await self._available(VISION)
 
     async def can_embed(self) -> bool:
-        return await self.has(self.embed_model)
+        return await self._available(EMBED)
+
+    def _need(self, capability: str) -> EngineStrategy:
+        s = self.strategy(capability)
+        if s is None:
+            raise EngineUnsupported(f"nessun motore configurato per: {capability}")
+        return s
+
+    # ------------------------------------------------------------ operazioni
+    async def generate_json(self, prompt: str, system: str = "", schema: dict[str, Any] | None = None,
+                            model: str | None = None) -> dict[str, Any]:
+        return await self._need(TEXT).generate_json(prompt, system=system, schema=schema, model=model)
+
+    async def chat(self, messages: list[dict[str, str]], model: str | None = None) -> str:
+        return await self._need(TEXT).chat(messages, model=model)
 
     async def describe_image(self, image: Path | bytes, prompt: str, as_json: bool = False) -> Any:
-        """Chiede al modello visivo di descrivere/leggere un'immagine (PNG/JPEG)."""
-        import aiohttp
-
-        raw = image.read_bytes() if isinstance(image, Path) else image
-        payload: dict[str, Any] = {
-            "model": self.vision_model, "prompt": prompt, "stream": False, "think": False,
-            "images": [base64.b64encode(raw).decode()], "options": {"temperature": 0},
-        }
-        if as_json:
-            payload["format"] = "json"
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as s:
-            async with s.post(f"{self.base_url}/api/generate", json=payload) as r:
-                r.raise_for_status()
-                data = await r.json()
-        text = data.get("response", "").strip()
-        return _parse_json(text) if as_json else text
+        return await self._need(VISION).describe_image(image, prompt, as_json=as_json)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        import aiohttp
+        return await self._need(EMBED).embed(texts)
 
-        payload = {"model": self.embed_model, "input": [t[:8000] for t in texts]}
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as s:
-            async with s.post(f"{self.base_url}/api/embed", json=payload) as r:
-                r.raise_for_status()
-                data = await r.json()
-        return data.get("embeddings", [])
+    def close(self) -> None:
+        for s in {id(s): s for s in self.strategies.values() if s}.values():
+            s.close()
+
+
+def _pick(requested: str, capability: str, model: str) -> str:
+    """'auto' → llama.cpp se installato e il modello GGUF è disponibile, altrimenti Ollama."""
+    requested = (requested or "auto").lower()
+    if requested != "auto":
+        if requested not in ENGINES:
+            raise ValueError(f"motore sconosciuto '{requested}' (disponibili: {', '.join(ENGINES)})")
+        return requested
+    if capability in (TEXT, EMBED):
+        from .engines.llamacpp import LlamaCppEngine, resolve_gguf
+
+        if LlamaCppEngine.installed() and resolve_gguf(model):
+            return "llamacpp"
+    return "ollama"
+
+
+def create_ai(engine: str = DEFAULT_ENGINE, vision_engine: str = DEFAULT_VISION_ENGINE,
+              embed_engine: str = DEFAULT_EMBED_ENGINE, model: str = DEFAULT_OLLAMA_MODEL,
+              vision_model: str = DEFAULT_VISION_MODEL, embed_model: str = DEFAULT_EMBED_MODEL,
+              ollama_url: str = DEFAULT_OLLAMA_URL) -> AIEngine:
+    """Costruisce la facciata scegliendo una strategia per capacità (una istanza per motore)."""
+    # se l'utente sceglie un motore preciso (es. --engine ollama), vale anche per gli embedding
+    embed_req = embed_engine if (embed_engine or "auto") != "auto" else engine
+    names = {TEXT: _pick(engine, TEXT, model),
+             VISION: _pick(vision_engine, VISION, vision_model),
+             EMBED: _pick(embed_req, EMBED, embed_model)}
+    instances: dict[str, EngineStrategy] = {}
+    for name in set(names.values()):
+        instances[name] = create_strategy(name, model=model, vision_model=vision_model,
+                                          embed_model=embed_model, base_url=ollama_url)
+    return AIEngine(instances[names[TEXT]], instances[names[VISION]], instances[names[EMBED]])
+
+
+__all__ = ["AIEngine", "create_ai", "DEFAULT_VISION_MODEL", "DEFAULT_EMBED_MODEL", "DEFAULT_OLLAMA_URL",
+           "DEFAULT_ENGINE", "DEFAULT_VISION_ENGINE", "DEFAULT_EMBED_ENGINE"]

@@ -62,6 +62,21 @@ class Request:
         return re.search(pattern, self.norm)
 
 
+# Descrizione degli argomenti per il router AI (un comando può aggiungerne in `param_docs`).
+PARAM_DOCS = {
+    "query": "testo da cercare o domanda",
+    "text": "testo della nota",
+    "n": "quanti elementi (numero)",
+    "kind": "images | documents | all",
+    "strictness": "strict | normal | loose",
+    "format": "md | json | csv",
+    "limit": "numero massimo di file",
+    "ref": "id o numero dell'operazione",
+    "file": "nome o parte del nome del file",
+    "target": "cartella di destinazione",
+}
+
+
 class Command(ABC):
     """Un comando della chat.
 
@@ -74,6 +89,8 @@ class Command(ABC):
       priority     ordine di prova: più basso = prima (risolve i conflitti tra comandi)
       destructive  True se modifica file (richiede conferma e passa dall'audit)
       hidden       non mostrato in 'aiuto'
+      group        famiglia del comando (aiuto raggruppato, router AI)
+      params       argomenti accettati; la descrizione per l'AI è in PARAM_DOCS
     """
 
     name: str = ""
@@ -85,6 +102,9 @@ class Command(ABC):
     destructive: bool = False
     hidden: bool = False
     params: tuple[str, ...] = ()   # argomenti accettati (documentati in GET /commands)
+    param_docs: dict[str, str] = {}
+    group: str = "altro"           # analisi | ricerca | organizzazione | memoria | sistema
+    needs_folder: bool = True      # lavora su una cartella (il router può passargliela)
 
     def match(self, req: Request) -> dict[str, Any] | None:
         """Restituisce gli argomenti se la frase è per questo comando, altrimenti None.

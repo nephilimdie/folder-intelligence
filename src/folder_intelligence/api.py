@@ -25,10 +25,10 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import __version__, audit, completion, exporter, organizer
-from .ai import DEFAULT_EMBED_MODEL, DEFAULT_VISION_MODEL, AIEngine
+from .ai import AIEngine, create_ai
 from .assistant import Assistant
 from .audit import app_home
-from .classifier import CATEGORIES, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL
+from .classifier import CATEGORIES
 from .commands import registry
 from .intelligence import CloudOnly, DocumentIntelligence
 from .intents import Intent
@@ -245,6 +245,7 @@ def create_app(
         ai = bool(state.ollama and await state.ollama.is_available())
         return {"version": __version__, "ai_available": ai,
                 "model": state.ollama.model if state.ollama else None,
+                "engines": state.ollama.describe() if state.ollama else None,
                 "default_directory": str(state.default_dir),
                 "cached_scans": [str(p) for p in state.scans],
                 "running_jobs": sum(1 for j in state.jobs.values() if j.status == "running")
@@ -548,7 +549,16 @@ def create_app(
             pending = {"kind": a.pending.kind, "count": len(a.pending),
                        "confirm_with": "sì", "cancel_with": "no"}
         return {"session_id": sid, "reply": reply, "directory": str(a.directory),
-                "pending": pending}
+                "pending": pending, "data": getattr(reply, "data", {})}
+
+    @app.post("/route", tags=["chat"], dependencies=secured)
+    async def route(req: ChatRequest) -> dict[str, Any]:
+        """Anteprima: quali comandi (e in che ordine) eseguirebbe la frase, senza eseguirli.
+        `source` = ai | rules | shortcut; `reply` = risposta diretta quando non serve nessun comando."""
+        start = resolve_dir(req.directory) if req.directory else state.default_dir
+        a = state.sessions.get(req.session_id or "") or state.assistant(start)
+        plan = await a.router.route(req.message, a)
+        return plan.to_dict()
 
     @app.delete("/chat/{session_id}", tags=["chat"], dependencies=secured, status_code=204)
     async def end_chat(session_id: str) -> None:
@@ -611,15 +621,14 @@ def create_app(
     return app
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, model: str = DEFAULT_OLLAMA_MODEL,
-          ollama_url: str = DEFAULT_OLLAMA_URL, use_ai: bool = True, memory: str = "json",
-          vision_model: str = DEFAULT_VISION_MODEL, embed_model: str = DEFAULT_EMBED_MODEL,
-          use_vision: bool = True) -> int:
+def serve(host: str = "127.0.0.1", port: int = 8765, ai: AIEngine | None = None,
+          use_ai: bool = True, memory: str = "json", use_vision: bool = True) -> int:
     import uvicorn
 
     token = get_or_create_token()
-    ai = AIEngine(ollama_url, model, vision_model, embed_model) if use_ai else None
-    app = create_app(ai, use_ai, create_memory(memory), token=token, use_vision=use_vision)
+    if ai is None and use_ai:
+        ai = create_ai()
+    app = create_app(ai, ai is not None, create_memory(memory), token=token, use_vision=use_vision)
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(f"⚠️  Attenzione: API esposte su {host}, raggiungibili da altri dispositivi in rete.")
     print(f"🤖 folderIntelligence API su http://{host}:{port}  (documentazione: /docs)")
