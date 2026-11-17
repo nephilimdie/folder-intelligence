@@ -189,6 +189,9 @@ class LlamaCppEngine(EngineStrategy):
         except (ImportError, ValueError):
             return False
 
+    def can_run(self, model: str | None) -> bool:
+        return not model or resolve_gguf(model) is not None
+
     async def available(self, capability: str = TEXT) -> bool:
         if capability not in (TEXT, EMBED) or not self.installed():
             return False

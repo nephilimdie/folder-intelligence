@@ -205,6 +205,13 @@ async def run_service(once: bool = False, ai=None) -> int:
                 _event("tagged", tagged)
             # 3) comprensione con l'AI dei file in attesa
             pending = [p for p in di.pending_enrichment(limit=BATCH) if p.exists()]
+            vectors = 0
+            if not pending:
+                from .vectors import EmbeddingStore, Reembedder
+
+                vectors = await Reembedder(EmbeddingStore(index), ai).run(limit=256)
+                if vectors:
+                    _log(f"ricerca per significato: {vectors} vettori ricalcolati")
             if not pending:
                 _log("niente da completare")
                 _live("idle")
@@ -236,7 +243,7 @@ async def run_service(once: bool = False, ai=None) -> int:
             lock.release()
         if once:
             return 0
-        await asyncio.sleep(CHECK_SECONDS if pending else CHECK_SECONDS * 10)
+        await asyncio.sleep(CHECK_SECONDS if pending or vectors else CHECK_SECONDS * 10)
 
 
 async def _refresh_watched(di) -> int:

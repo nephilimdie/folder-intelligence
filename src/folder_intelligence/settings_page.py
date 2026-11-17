@@ -16,6 +16,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.widgets import Frame, TextArea
 
 from . import completion, settings
+from .settings_models import model_rows
 from .i18n import N_, _, set_language
 
 if TYPE_CHECKING:
@@ -101,9 +102,10 @@ class SettingsPage:
              "act": lambda: self.set(require_ac_power=not s.require_ac_power)},
             {"kind": "choice", "label": _("Carico del Mac"), "value": _(LOAD_LABELS[s.max_system_load]),
              "act": lambda: self.set(max_system_load=_cycle(settings.LOAD_CHOICES, s.max_system_load))},
-            {"kind": "section", "label": _("AI e integrazioni")},
-            {"kind": "choice", "label": _("Modello per i riassunti"), "value": s.index_model,
-             "act": lambda: self.set_model(_cycle(settings.INDEX_MODEL_CHOICES, s.index_model))},
+        ]
+        rows += model_rows(self)
+        rows += [
+            {"kind": "section", "label": _("Integrazioni")},
             {"kind": "choice", "label": _("Eventi nel Calendario"),
              "value": _("no") if s.calendar.lower() == "off" else s.calendar,
              "act": lambda: self.set(calendar="off" if s.calendar.lower() != "off" else "folderIntelligence")},

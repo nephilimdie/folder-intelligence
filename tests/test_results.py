@@ -149,7 +149,7 @@ def test_result_boxes_stack_and_switch(tmp_path, monkeypatch):
     area.focus_next(1)
     assert area.active is area.boxes[1]
     opened = []
-    monkeypatch.setattr("folder_intelligence.results_page.subprocess.run", lambda cmd, **k: opened.append(cmd))
+    monkeypatch.setattr("folder_intelligence.results_box.subprocess.run", lambda cmd, **k: opened.append(cmd))
     area.boxes[1].run(["open", "-R"], "x {name}")
     assert opened[0][:2] == ["open", "-R"] and opened[0][2] == area.boxes[1].selected_path()
     area.close(area.boxes[1])
@@ -182,7 +182,7 @@ def test_result_boxes_react_to_mouse_clicks(tmp_path, monkeypatch):
     click(first, 1)  # box chiuso: riga 1 = secondo file
     assert area.active is first and first.selected == 1 and a.last_results is first.rs
     opened = []
-    monkeypatch.setattr("folder_intelligence.results_page.subprocess.run", lambda cmd, **k: opened.append(cmd))
+    monkeypatch.setattr("folder_intelligence.results_box.subprocess.run", lambda cmd, **k: opened.append(cmd))
     first.render()
     line = first._line_hits.index(2)  # box aperto: le intestazioni dei gruppi non sono file
     click(first, line)

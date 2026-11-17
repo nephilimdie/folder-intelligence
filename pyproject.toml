@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "folder-intelligence"
-version = "1.16.0"
+version = "1.17.0"
 description = "Local AI assistant for your Mac folders: understands your files, finds duplicates and similar photos, searches by meaning and tidies up safely."
 readme = "README.md"
 license = "MIT"
@@ -15,6 +15,8 @@ dependencies = ["aiohttp>=3.9.0", "rich>=13.0.0", "prompt_toolkit>=3.0.40", "cry
 [project.optional-dependencies]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
 llama = ["llama-cpp-python>=0.3.37"]
+mac = ["pyobjc-framework-Vision>=11", "pyobjc-framework-Quartz>=11"]   # OCR con Apple Vision
+tables = ["docling>=2"]   # tabelle dei PDF in Markdown (grande: scarica torch e modelli)
 dev = ["pytest>=8", "pyte>=0.8", "httpx>=0.27", "fastapi>=0.110", "uvicorn[standard]>=0.27"]
 
 [project.scripts]

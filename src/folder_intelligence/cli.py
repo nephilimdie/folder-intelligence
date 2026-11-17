@@ -215,7 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=8765, help=_("porta API (default 8765)"))
     p.add_argument("--memory", default="json", choices=["json", "inmemory", "lightrag"], help=_("backend memoria"))
     p.add_argument("--no-ai", action="store_true", help=_("non usare l'AI locale"))
-    p.add_argument("--model", default=DEFAULT_OLLAMA_MODEL,
+    p.add_argument("--model", default=None,
                    help=_("modello testuale: nome Ollama (es. qwen2.5:14b, riusato anche da llama.cpp) o file "
                           ".gguf (default {model})", model=DEFAULT_OLLAMA_MODEL))
     engines = ["auto", *ENGINES]
@@ -230,11 +230,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help=_("come interpretare le frasi: ai (default, piano di comandi deciso dal modello) o rules"))
     p.add_argument("--router-model", default=None,
                    help=_("modello per interpretare le frasi (default = --model; es. qwen2.5:7b, più veloce)"))
-    p.add_argument("--vision-model", default=DEFAULT_VISION_MODEL,
+    p.add_argument("--vision-model", default=None,
                    help=_("modello per immagini (default {model})", model=DEFAULT_VISION_MODEL))
-    p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL,
+    p.add_argument("--embed-model", default=None,
                    help=_("modello embedding (default {model})", model=DEFAULT_EMBED_MODEL))
     p.add_argument("--no-vision", action="store_true", help=_("non usare il modello visivo (più veloce)"))
+    p.add_argument("--bench-init", metavar=_("CARTELLA"),
+                   help=_("banco di prova: crea bench.json con i file della cartella, da completare con le "
+                          "risposte giuste"))
+    p.add_argument("--bench", metavar=_("CARTELLA"),
+                   help=_("banco di prova: confronta OCR e modelli sui file di bench.json"))
+    p.add_argument("--bench-configs", metavar=_("NOMI"),
+                   help=_("solo queste combinazioni, separate da virgola (prima, apple-ocr, …)"))
     p.add_argument("--index-limit", type=int, default=0,
                    help=_("massimo file analizzati per 'indicizza' (0 = tutti)"))
     p.add_argument("--mcp-mode", choices=MODES, default=None,
@@ -579,6 +586,10 @@ def _main(argv: list[str] | None = None) -> int:
 
     if args.background or args.install_background or args.uninstall_background or args.background_status:
         return background_command(args)
+    if args.bench_init or args.bench:
+        from .bench import bench_init, bench_run
+
+        return bench_init(args.bench_init) if args.bench_init else bench_run(args.bench, args.bench_configs)
 
     # un solo processo alla volta scrive l'indice cifrato: se il servizio in background sta
     # lavorando, gli chiediamo di salvare e aspettiamo qualche secondo

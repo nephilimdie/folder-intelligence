@@ -21,12 +21,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .classifier import DEFAULT_OLLAMA_MODEL
 from .engines import ENGINES, create_strategy
 from .engines.base import EMBED, TEXT, VISION, EngineStrategy, EngineUnsupported
 from .engines.ollama import DEFAULT_URL as DEFAULT_OLLAMA_URL
 
-DEFAULT_VISION_MODEL = os.environ.get("FI_VISION_MODEL", "qwen3.5:9b")
+DEFAULT_VISION_MODEL = os.environ.get("FI_VISION_MODEL", "qwen3.5:9b")   # default delle impostazioni
 DEFAULT_EMBED_MODEL = os.environ.get("FI_EMBED_MODEL", "bge-m3")
 DEFAULT_ENGINE = os.environ.get("FI_ENGINE", "auto")
 DEFAULT_VISION_ENGINE = os.environ.get("FI_VISION_ENGINE", "auto")
@@ -49,6 +48,7 @@ class AIEngine:
                  embed: EngineStrategy | None = None) -> None:
         self.strategies: dict[str, EngineStrategy | None] = {TEXT: text, VISION: vision, EMBED: embed}
         self._cache: dict[str, tuple[float, bool]] = {}
+        self._fallback: EngineStrategy | None = None
 
     # ------------------------------------------------------------ descrizione
     def strategy(self, capability: str) -> EngineStrategy | None:
@@ -119,15 +119,32 @@ class AIEngine:
         return s
 
     # ------------------------------------------------------------ operazioni
+    def _text_for(self, model: str | None) -> EngineStrategy:
+        """Strategia di testo che sa caricare `model`: se quella scelta non può (llama.cpp con
+        Qwen3.5), la richiesta va a Ollama, che legge tutti i modelli scaricati."""
+        s = self._need(TEXT)
+        if not model or s.can_run(model):
+            return s
+        if self._fallback is None:
+            self._fallback = create_strategy("ollama", model=model)
+        return self._fallback
+
     async def generate_json(self, prompt: str, system: str = "", schema: dict[str, Any] | None = None,
                             model: str | None = None) -> dict[str, Any]:
-        return await self._need(TEXT).generate_json(prompt, system=system, schema=schema, model=model)
+        return await self._text_for(model).generate_json(prompt, system=system, schema=schema, model=model)
 
     async def chat(self, messages: list[dict[str, str]], model: str | None = None) -> str:
-        return await self._need(TEXT).chat(messages, model=model)
+        return await self._text_for(model).chat(messages, model=model)
 
-    async def describe_image(self, image: Path | bytes, prompt: str, as_json: bool = False) -> Any:
-        return await self._need(VISION).describe_image(image, prompt, as_json=as_json)
+    async def describe_image(self, image: Path | bytes, prompt: str, as_json: bool = False,
+                             model: str | None = None) -> Any:
+        return await self._need(VISION).describe_image(image, prompt, as_json=as_json, model=model)
+
+    async def has_model(self, model: str) -> bool:
+        """True se il modello è installato in Ollama (es. qwen3-vl per i documenti, glm-ocr)."""
+        s = self.strategy(VISION)
+        has = getattr(s, "has", None)
+        return bool(s and callable(has) and await has(model))
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return await self._need(EMBED).embed(texts)
@@ -154,7 +171,7 @@ class AIEngine:
         return total_memory_gb() < LOW_MEMORY_GB
 
     def close(self) -> None:
-        for s in {id(s): s for s in self.strategies.values() if s}.values():
+        for s in {id(s): s for s in [*self.strategies.values(), self._fallback] if s}.values():
             s.close()
 
 
@@ -174,10 +191,16 @@ def _pick(requested: str, capability: str, model: str) -> str:
 
 
 def create_ai(engine: str = DEFAULT_ENGINE, vision_engine: str = DEFAULT_VISION_ENGINE,
-              embed_engine: str = DEFAULT_EMBED_ENGINE, model: str = DEFAULT_OLLAMA_MODEL,
-              vision_model: str = DEFAULT_VISION_MODEL, embed_model: str = DEFAULT_EMBED_MODEL,
+              embed_engine: str = DEFAULT_EMBED_ENGINE, model: str | None = None,
+              vision_model: str | None = None, embed_model: str | None = None,
               ollama_url: str = DEFAULT_OLLAMA_URL) -> AIEngine:
-    """Costruisce la facciata scegliendo una strategia per capacità (una istanza per motore)."""
+    """Costruisce la facciata scegliendo una strategia per capacità (una istanza per motore).
+    I modelli non indicati vengono dalle impostazioni (pagina F3; variabili FI_* hanno la precedenza)."""
+    from . import settings
+
+    model = model or settings.chat_model()
+    vision_model = vision_model or settings.vision_model()
+    embed_model = embed_model or settings.embed_model()
     # se l'utente sceglie un motore preciso (es. --engine ollama), vale anche per gli embedding
     embed_req = embed_engine if (embed_engine or "auto") != "auto" else engine
     names = {TEXT: _pick(engine, TEXT, model),

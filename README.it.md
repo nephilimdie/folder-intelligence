@@ -112,6 +112,22 @@ Bollette". API: `GET /results/search` (filtri), `POST /results/finder`, `GET/POS
 
 Il box **🌙 Indicizzazione automatica** nella colonna di destra mostra il servizio in background (spento / in pausa / al lavoro, con avanzamento), per ogni cartella sorvegliata quanti file sono già compresi dall'AI (barra, % e numero) e gli ultimi giri. A chat aperta l'indice lo tiene la chat e il servizio si mette in pausa: lo stesso lavoro lo fa allora la chat, quando non c'è nulla in corso e non scrivi da un minuto (stesse condizioni: attiva, alimentazione, Mac non impegnato), e si ferma dopo il file in corso appena scrivi.
 
+**Lettura di foto e documenti.** Immagini e pagine scansionate passano dall'**OCR** (di default Apple Vision:
+il motore di "Testo attivo" di macOS, sul Neural Engine; Tesseract come riserva; volendo un modello OCR locale
+come `glm-ocr`). Se l'OCR trova un documento (scontrino, bolletta, estratto conto, schermata con testo) va al
+**modello per i documenti** (`qwen3-vl:8b` se installato), che estrae anche i **campi**: tipo, data, importo,
+valuta, emittente, numero. Le foto vanno al modello visivo generale. I campi rendono precise le ricerche:
+"solo i pdf", "sopra 100 €", "tra 50 e 100 euro". I PDF digitali mantengono le **colonne delle tabelle**
+(`a | b | c`); con `docling` installato (`pip install .[tables]`) i PDF con tabelle diventano tabelle
+Markdown nella fase di comprensione. I modelli si scelgono in Impostazioni → *Modelli e lettura*; cambiare il
+modello di ricerca ricalcola i vettori in background (la ricerca per parole continua a funzionare). I modelli
+che llama.cpp non sa caricare (es. Qwen3.5) vanno a Ollama da soli.
+
+**Banco di prova**: `folder-intelligence --bench-init ~/Campioni` scrive `bench.json` con i file della
+cartella; aggiungi le risposte giuste (kind, date, amount, issuer, words), poi `folder-intelligence --bench
+~/Campioni` confronta le combinazioni (attuale, OCR Apple, riassunti Qwen3.5, qwen3-vl per i documenti,
+glm-ocr) con un indice temporaneo: risposte giuste per campo e secondi per file. Nulla esce dal Mac.
+
 **Impostazioni** (`impostazioni`, o F3): le cartelle da indicizzare in automatico in background, quando
 farlo (le cartelle si scelgono nella finestra "Scegli cartella" di macOS, che parte dalla home; inattivo da 2–30 minuti, solo con l'alimentazione collegata, solo se il Mac non sta facendo altro —
 misurato sul carico medio della CPU), il modello per i riassunti, gli eventi nel Calendario, la lingua e la

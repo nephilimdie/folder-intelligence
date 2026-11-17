@@ -110,6 +110,22 @@ by the background service. "save this search as Trips", "saved searches", "open 
 
 The **🌙 Automatic indexing** box in the right column shows the background service (off / paused / working, with progress), for each watched folder how many files are already understood by the AI (bar, % and count), and the latest runs. While the chat is open it holds the index, so the service pauses: instead the chat itself does the same work when nothing is running and you have not typed for a minute (same conditions: enabled, on power, Mac not busy), and stops after the current file as soon as you type.
 
+**Reading photos and documents.** Images and scanned pages go through **OCR** (Apple Vision by default: the
+macOS Live Text engine, on the Neural Engine; Tesseract as fallback; optionally a local OCR model such as
+`glm-ocr`). If the OCR finds a document (receipt, bill, statement, screenshot with text) it goes to the
+**document model** (`qwen3-vl:8b` if installed), which also extracts **fields**: kind, date, amount,
+currency, issuer, number. Photos go to the general vision model. Fields make searches precise: "only the
+pdfs", "above 100 €", "between 50 and 100 euro". Digital PDFs keep **table columns** (`a | b | c`);
+with `docling` installed (`pip install .[tables]`) PDFs with tables are converted to Markdown tables in
+the understanding pass. Models are chosen in Settings → *Models and reading*; changing the search model
+recomputes the vectors in the background (word search keeps working). Models that llama.cpp cannot load
+(e.g. Qwen3.5) are sent to Ollama automatically.
+
+**Test bench**: `folder-intelligence --bench-init ~/Samples` writes `bench.json` with the files of the
+folder; add the right answers (kind, date, amount, issuer, words), then `folder-intelligence --bench
+~/Samples` compares the combinations (current, Apple OCR, Qwen3.5 summaries, qwen3-vl for documents,
+glm-ocr) with a temporary index: correct answers per field and seconds per file. Nothing leaves the Mac.
+
 **Settings** (`settings`, or F3): the folders to index automatically in the background, when to do it
 (folders are chosen in the native macOS "Choose folder" window, starting from home; idle for 2–30 minutes, only when plugged in, only when the Mac isn't doing anything else — measured
 on the CPU load average), the summary model, Calendar events, language and MCP memory. Turning on

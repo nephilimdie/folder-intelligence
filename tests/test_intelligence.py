@@ -132,7 +132,7 @@ class FakeAI:
     async def chat(self, messages):
         return "Il preventivo è di 12.000 euro [1]."
 
-    async def describe_image(self, image, prompt, as_json=False):
+    async def describe_image(self, image, prompt, as_json=False, model=None):
         return "Una ricevuta d'albergo"
 
 
@@ -160,14 +160,14 @@ def test_ocr_on_image_and_scanned_pdf(tmp_path):
     img = tmp_path / "scan.png"
     di = engine()
     ex = run(di.extract(img))
-    assert "HOTEL ROMA" in ex.text.upper() and "ocr" in ex.engine
+    assert "HOTEL ROMA" in ex.text.upper() and any(k in ex.engine for k in ("apple", "tesseract"))
     # PDF composto solo da un'immagine → OCR automatico
     if shutil.which("sips"):
         scanned = tmp_path / "scansione.pdf"
         subprocess.run(["sips", "-s", "format", "pdf", str(img), "--out", str(scanned)], capture_output=True)
         if scanned.exists():
             ex = run(di.extract(scanned))
-            assert "ROMA" in ex.text.upper() and "ocr" in ex.engine
+            assert "ROMA" in ex.text.upper() and any(k in ex.engine for k in ("apple", "tesseract"))
 
 
 def test_extractors_are_plugins():

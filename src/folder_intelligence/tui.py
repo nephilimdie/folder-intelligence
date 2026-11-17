@@ -309,7 +309,7 @@ class ChatTUI:
         # pagina impostazioni: finestra sopra la conversazione (F3 o "impostazioni")
         from .settings_page import SettingsPage
 
-        from .results_page import ResultsArea
+        from .results_area import ResultsArea
 
         self.settings_open = False
         self.settings_page = SettingsPage(self)
@@ -655,6 +655,9 @@ class ChatTUI:
                 out.append(("class:muted", f"  {work['file']}"[:width] + "\n"))
         elif work.get("phase") == "scan":
             out.append(("class:today", _("● al lavoro: controllo le cartelle") + "\n"))
+        elif work.get("phase") == "vectors":
+            out.append(("class:today", _("● al lavoro: ricerca per significato ({n} file)",
+                                         n=work.get("remaining", 0)) + "\n"))
         elif work.get("phase") == "done":
             out.append(("class:today", _("✓ tutto letto e compreso") + "\n"))
         elif work.get("phase") == "paused":

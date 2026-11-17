@@ -94,10 +94,11 @@ class OllamaEngine(EngineStrategy):
         return data.get("message", {}).get("content", "").strip()
 
     # ---------------------------------------------------------------- immagini
-    async def describe_image(self, image: Path | bytes, prompt: str, as_json: bool = False) -> Any:
+    async def describe_image(self, image: Path | bytes, prompt: str, as_json: bool = False,
+                             model: str | None = None) -> Any:
         raw = image.read_bytes() if isinstance(image, Path) else image
         payload: dict[str, Any] = {
-            "model": self.vision_model, "prompt": prompt, "stream": False, "think": False,
+            "model": model or self.vision_model, "prompt": prompt, "stream": False, "think": False,
             "images": [base64.b64encode(raw).decode()], "options": {"temperature": 0},
         }
         if as_json:

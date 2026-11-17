@@ -1,13 +1,14 @@
-"""Immagini: OCR (tesseract) + descrizione col modello visivo locale."""
+"""Immagini: OCR e modello visivo tramite `VisualReader` (documento o foto)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from .. import shell
-from .base import ExtractContext, Extraction, Extractor, vision_prompt
+from ..documents import VisualReading
+from .base import ExtractContext, Extraction, Extractor
 
-MAX_SIDE = 1280
+MAX_SIDE = 1600   # lato massimo: abbastanza per leggere uno scontrino, leggero per il modello visivo
 
 
 class ImageExtractor(Extractor):
@@ -17,35 +18,32 @@ class ImageExtractor(Extractor):
                             ".tif", ".tiff"})
 
     async def extract(self, path: Path, ctx: ExtractContext) -> Extraction | None:
+        meta = await self._size(path)
         img = await self._prepare(path, ctx)
-        text = ""
-        description = ""
-        engine = self.name
-        meta: dict = {}
         try:
-            if shell.which("sips"):
-                r = await shell.run(["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(path)], timeout=15)
-                for line in r.stdout.splitlines():
-                    if "pixelWidth" in line or "pixelHeight" in line:
-                        k, _sep, v = line.strip().partition(":")
-                        meta[k.strip()] = v.strip()
-            if shell.which("tesseract"):
-                r = await shell.run(["tesseract", str(img), "-", "-l", ctx.ocr_lang, "--psm", "3"], timeout=90)
-                text = r.stdout.strip() if len(r.stdout.strip()) > 15 else ""
-                if text:
-                    engine += "+ocr"
-            if await ctx.vision_ok():
-                try:
-                    description = await ctx.ai.describe_image(img, vision_prompt())  # type: ignore[union-attr]
-                    engine += "+vision"
-                except Exception:
-                    pass
+            reading = await ctx.visual.read(img) if ctx.visual else VisualReading()
         finally:
             if img != path:
                 img.unlink(missing_ok=True)
-        return Extraction(text=text[: ctx.max_chars], description=description, metadata=meta, engine=engine)
+        meta.update(reading.metadata())
+        engine = f"{self.name}+{reading.engine}" if reading.engine else self.name
+        return Extraction(text=reading.text[: ctx.max_chars], description=reading.description, metadata=meta,
+                          engine=engine)
 
-    async def _prepare(self, path: Path, ctx: ExtractContext) -> Path:
+    @staticmethod
+    async def _size(path: Path) -> dict:
+        if not shell.which("sips"):
+            return {}
+        r = await shell.run(["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(path)], timeout=15)
+        meta = {}
+        for line in r.stdout.splitlines():
+            if "pixelWidth" in line or "pixelHeight" in line:
+                k, _sep, v = line.strip().partition(":")
+                meta[k.strip()] = v.strip()
+        return meta
+
+    @staticmethod
+    async def _prepare(path: Path, ctx: ExtractContext) -> Path:
         """Converte (HEIC, TIFF…) e ridimensiona in JPEG con `sips` per OCR e modello visivo."""
         if not shell.which("sips"):
             return path

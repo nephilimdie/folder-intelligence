@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..ai import AIEngine
+    from ..documents import VisualReader
 
 
 @dataclass
@@ -29,7 +30,8 @@ class ExtractContext:
     use_vision: bool = True        # usa il modello visivo per immagini/video/PDF scansionati
     tmpdir: Path = Path("/tmp")    # cartella temporanea per conversioni
     max_chars: int = 20_000        # testo massimo conservato per file
-    ocr_lang: str = "ita+eng"
+    visual: "VisualReader | None" = None   # OCR + modello visivo per immagini e pagine scansionate
+    deep: bool = True                      # fase di comprensione (False = passo veloce)
 
     async def vision_ok(self) -> bool:
         return bool(self.use_vision and self.ai and await self.ai.can_see())
@@ -56,12 +58,3 @@ class Extractor(ABC):
 
     @abstractmethod
     async def extract(self, path: Path, ctx: ExtractContext) -> Extraction | None: ...
-
-
-def vision_prompt() -> str:
-    from ..i18n import language_name
-
-    return (f"Describe in {language_name()}, in 2-4 sentences, what this image shows: what kind of image "
-            "it is (photo, screenshot, document, receipt, ticket, diagram…), subjects, places, objects "
-            "and the most important readable text (dates, amounts, company names). "
-            "Do not identify people by name.")

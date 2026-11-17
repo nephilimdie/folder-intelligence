@@ -38,7 +38,7 @@ class FakeVision(Fake):
     supports_text = supports_embeddings = False
     supports_vision = True
 
-    async def describe_image(self, image, prompt, as_json=False):
+    async def describe_image(self, image, prompt, as_json=False, model=None):
         self.calls.append(("image", prompt))
         return "una ricevuta"
 
@@ -169,7 +169,7 @@ def test_indexing_never_keeps_text_and_vision_models_loaded_together(tmp_path, m
         def release(self, capability):
             log.append(f"release-{capability}")
 
-        async def describe_image(self, image, prompt, as_json=False):
+        async def describe_image(self, image, prompt, as_json=False, model=None):
             log.append("vision")
             return "foto"
 

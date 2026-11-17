@@ -66,6 +66,10 @@ class EngineStrategy(ABC):
         return {TEXT: self.supports_text, VISION: self.supports_vision,
                 EMBED: self.supports_embeddings}.get(capability, False)
 
+    def can_run(self, model: str | None) -> bool:
+        """True se questo motore sa caricare il modello indicato (es. llama.cpp non legge Qwen3.5)."""
+        return True
+
     def model_for(self, capability: str) -> str:
         return {TEXT: self.model, VISION: self.vision_model, EMBED: self.embed_model}.get(capability, "")
 
@@ -96,7 +100,8 @@ class EngineStrategy(ABC):
         raise EngineUnsupported(_("{engine}: chat non supportata", engine=self.name))
 
     # ---------------------------------------------------------------- immagini
-    async def describe_image(self, image: Path | bytes, prompt: str, as_json: bool = False) -> Any:
+    async def describe_image(self, image: Path | bytes, prompt: str, as_json: bool = False,
+                             model: str | None = None) -> Any:
         raise EngineUnsupported(_("{engine}: lettura immagini non supportata", engine=self.name))
 
     # ---------------------------------------------------------------- vettori

@@ -4,7 +4,7 @@ Pipeline per file:
   1. metadati (stat + Spotlight `mdls`: provenienza download, autore, pagine, GPS…)
   2. estrazione con il primo estrattore adatto (vedi cartella extractors/)
   3. comprensione AI (modello testuale): categoria, titolo, descrizione, tag, date, importi
-  4. embedding (bge-m3) per la ricerca semantica
+  4. embedding (modello scelto nelle impostazioni, vedi vectors/) per la ricerca semantica
   5. salvataggio nell'indice (incrementale)
 
 Ricerca ibrida (reciprocal rank fusion): FTS5 + semantica + Spotlight + nome file.
@@ -27,21 +27,20 @@ from typing import Any, Callable
 from . import shell
 from .ai import AIEngine
 from .classifier import CATEGORIES, RuleClassifier
+from .documents import DocumentFields, VisualReader
 from .extractors import ExtractContext, Extraction, Extractor, load_extractors
 from .engines.base import TEXT, VISION
 from .i18n import N_, _, language_name
 from .index import Index, query_terms
+from .ocr import OcrEngineKind, build_ocr
 from .threads import Cancelled, Timeout
+from .vectors import EmbeddingProfile, EmbeddingStore, embedding_text
 
 EXTRACT_TIMEOUT = 240  # secondi massimi per file (OCR + modello visivo inclusi)
 MAX_FILE_BYTES = 2 * 1024 ** 3  # oltre: solo metadati
-# Soglie per bge-m3, misurate su documenti reali: pertinenti ≈ 0.55–0.71, estranei ≤ 0.50.
 PHASE_BATCH = int(os.environ.get("FI_PHASE_BATCH", "16"))  # file per blocco (cambio modello)
 VISUAL_EXT = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tif", ".tiff", ".gif", ".bmp",
               ".pdf", ".mp4", ".mov", ".m4v", ".mkv", ".avi"}  # possono richiedere il modello visivo
-SEMANTIC_MIN = float(os.environ.get("FI_SEMANTIC_MIN", "0.53"))  # ricerca "cerca": precisa
-SEMANTIC_MIN_LOOSE = 0.40   # domande ("chiedi"): meglio qualche fonte in più, sceglie il modello
-SEMANTIC_MARGIN = 0.07      # distanza massima dal risultato migliore
 
 
 # File che non sono documenti: dati interni di app, lock, frammenti con nomi-identificativo.
@@ -85,7 +84,8 @@ def summary_system() -> str:
         f'"doc_type": "<generic type in 1-2 words, in {language}: receipt, invoice, contract, policy, '
         'minutes, letter, cv, bank statement, photo, screenshot, presentation, code, …>", '
         f'"tags": ["<3-6 lowercase keywords in {language}: people/companies, places, topics, year>"], '
-        '"date": "<main date YYYY-MM-DD or null>", "amount": "<main amount with currency or null>"}'
+        '"date": "<main date YYYY-MM-DD or null>", "amount": "<main amount with currency or null>", '
+        + DocumentFields.schema_hint() + "}"
     )
 
 
@@ -123,12 +123,27 @@ class DocumentIntelligence:
         # modello per i riassunti dell'indicizzazione (FI_INDEX_MODEL; "" = quello principale)
         from . import settings
 
-        self.index_model: str | None = settings.index_model()
+        # lettura: catena OCR e modelli scelti nelle impostazioni (il banco di prova li cambia)
+        self.configure_reading(build_ocr(OcrEngineKind.parse(settings.ocr_engine()), ai, settings.ocr_model()),
+                               settings.document_model(), settings.index_model())
+        # vettori: soglie del modello in uso; se il modello è cambiato i vecchi vettori si ricalcolano
+        embed_model = getattr(ai, "embed_model", "") if ai else ""
+        self.embedding = EmbeddingProfile.for_model(embed_model)
+        if embed_model:
+            EmbeddingStore(self.index).use_model(embed_model)
+
+    def configure_reading(self, ocr, document_model: str, summary_model: str | None) -> None:
+        """Motore OCR, modello per i documenti fotografati e modello per i riassunti."""
+        self.ocr = ocr
+        self.document_model = document_model
+        self.index_model: str | None = summary_model or None
 
     # --------------------------------------------------------------- estrazione
     async def extract(self, path: Path, vision: bool | None = None) -> Extraction:
         use_vision = self.use_vision if vision is None else (vision and self.use_vision)
-        ctx = ExtractContext(ai=self.ai, use_vision=use_vision, tmpdir=self._tmp)
+        visual = VisualReader(self.ocr, self.ai, self.document_model, use_vision)
+        ctx = ExtractContext(ai=self.ai, use_vision=use_vision, tmpdir=self._tmp, visual=visual,
+                             deep=vision is not False)
         last_error = ""
         for ex in self.extractors:
             if not ex.supports(path) or not await ex.available(ctx):
@@ -183,6 +198,7 @@ class DocumentIntelligence:
             "date": data.get("date") if data.get("date") not in ("null", "") else None,
             "amount": data.get("amount") if data.get("amount") not in ("null", "") else None,
             "doc_type": str(data.get("doc_type") or "").lower()[:40] or None,
+            "fields": DocumentFields.from_dict(data.get("fields")),
             "source": "ai",
         }
 
@@ -212,6 +228,11 @@ class DocumentIntelligence:
         path, st, meta, ex = read
         info = await self.understand(path, ex, meta) if understand else self._quick_info(path, ex)
         meta.update({k: info[k] for k in ("date", "amount", "doc_type") if info.get(k)})
+        # campi del documento: quelli letti dall'immagine, completati da quelli del riassunto
+        fields = DocumentFields.from_dict(meta.get("fields")).merged_with(info.get("fields") or DocumentFields())
+        if not fields.empty:
+            meta["fields"] = fields.to_dict()
+            info["tags"] = list(dict.fromkeys([*info["tags"], *fields.search_terms()]))[:14]
         # da completare con la comprensione dell'AI? (solo se c'è qualcosa da capire)
         meta["enriched"] = bool(understand) or not (ex.text.strip() or path.suffix.lower() in VISUAL_EXT)
 
@@ -225,10 +246,8 @@ class DocumentIntelligence:
         }
         embedding = None
         if self.ai and await self.ai.can_embed():
-            emb_text = " ".join([path.name, info["title"], info["description"], " ".join(info["tags"]),
-                                 ex.description[:800], ex.text[:2000]])
             try:
-                vecs = await self.ai.embed([emb_text])
+                vecs = await self.ai.embed([embedding_text(doc)])
                 embedding = vecs[0] if vecs else None
             except Exception:
                 embedding = None
@@ -412,7 +431,8 @@ class DocumentIntelligence:
         if self.ai and await self.ai.can_embed() and self.index.stats(root)["with_embedding"]:
             try:
                 expanded = await self.expand_query(query)
-                texts = [query] + ([query + ". " + ", ".join(expanded)] if expanded else [])
+                texts = [self.embedding.query(query)] + (
+                    [self.embedding.query(query + ". " + ", ".join(expanded))] if expanded else [])
                 vecs = await self.ai.embed(texts)
                 # per ogni documento il punteggio migliore tra richiesta originale ed espansa:
                 # i sinonimi aiutano ("macchina" → auto) ma a volte diluiscono ("mediazione")
@@ -423,8 +443,8 @@ class DocumentIntelligence:
                 sem = sorted(best.items(), key=lambda kv: -kv[1])
                 if sem:
                     # soglia assoluta + relativa al migliore: evita risultati "vagamente simili"
-                    floor = SEMANTIC_MIN if precise else SEMANTIC_MIN_LOOSE
-                    cut = max(floor, sem[0][1] - SEMANTIC_MARGIN)
+                    floor = self.embedding.min_score if precise else self.embedding.loose_min
+                    cut = max(floor, sem[0][1] - self.embedding.margin)
                     add([p for p, sc in sem if sc >= cut], N_("significato"), 1.2)
             except Exception:
                 pass

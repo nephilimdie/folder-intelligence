@@ -24,7 +24,12 @@ IDLE_CHOICES = (2, 5, 10, 15, 30)
 LOAD_CHOICES = ("low", "medium", "any")     # quanto deve essere "libero" il Mac
 LANG_CHOICES = ("auto", "it", "en")
 MCP_CHOICES = ("sealed", "summary", "off")
-INDEX_MODEL_CHOICES = ("qwen2.5:7b", "qwen2.5:14b")
+INDEX_MODEL_CHOICES = ("qwen2.5:7b", "qwen3.5:9b", "qwen2.5:14b")
+CHAT_MODEL_CHOICES = ("qwen2.5:14b", "qwen3.5:9b")
+VISION_MODEL_CHOICES = ("qwen3.5:9b", "qwen3-vl:8b")
+DOCUMENT_MODEL_CHOICES = ("qwen3-vl:8b", "qwen3.5:9b")
+OCR_ENGINE_CHOICES = ("auto", "apple", "tesseract", "model")
+EMBED_MODEL_CHOICES = ("bge-m3", "qwen3-embedding:0.6b", "qwen3-embedding:4b")
 DESTINATION_CHOICES = ("tag", "aliases")     # risultati nel Finder: etichetta o cartella di alias
 
 
@@ -38,6 +43,12 @@ class Settings:
     max_system_load: str = "low"           # "low": il Mac non sta facendo altro; "medium"; "any"
     # AI e integrazioni
     index_model: str = "qwen2.5:7b"
+    chat_model: str = "qwen2.5:14b"        # chat, domande e router dei comandi
+    vision_model: str = "qwen3.5:9b"       # foto
+    document_model: str = "qwen3-vl:8b"    # documenti fotografati/scansionati (se installato)
+    ocr_engine: str = "auto"               # auto = Apple Vision, riserva Tesseract
+    ocr_model: str = "glm-ocr"             # modello OCR quando ocr_engine = "model"
+    embed_model: str = "bge-m3"            # ricerca per significato (cambiarlo ricalcola i vettori)
     calendar: str = "folderIntelligence"   # "off" per non creare eventi
     language: str = "auto"
     mcp_mode: str = "sealed"
@@ -102,6 +113,11 @@ def validate(s: Settings) -> None:
         s.language = "auto"
     if s.mcp_mode not in MCP_CHOICES:
         s.mcp_mode = "sealed"
+    if s.ocr_engine not in OCR_ENGINE_CHOICES:
+        s.ocr_engine = "auto"
+    for name, default in (("chat_model", "qwen2.5:14b"), ("vision_model", "qwen3.5:9b"),
+                          ("document_model", "qwen3-vl:8b"), ("ocr_model", "glm-ocr"), ("embed_model", "bge-m3")):
+        setattr(s, name, str(getattr(s, name) or default).strip())
     if s.results_destination not in DESTINATION_CHOICES:
         s.results_destination = "tag"
     s.aliases_folder = s.aliases_folder or "~/Risultati"
@@ -143,6 +159,30 @@ def idle_minutes() -> float:
 
 def index_model() -> str | None:
     return env_or("FI_INDEX_MODEL", load().index_model) or None
+
+
+def chat_model() -> str:
+    return str(env_or("FI_OLLAMA_MODEL", load().chat_model))
+
+
+def vision_model() -> str:
+    return str(env_or("FI_VISION_MODEL", load().vision_model))
+
+
+def document_model() -> str:
+    return str(env_or("FI_DOCUMENT_MODEL", load().document_model))
+
+
+def ocr_engine() -> str:
+    return str(env_or("FI_OCR_ENGINE", load().ocr_engine))
+
+
+def ocr_model() -> str:
+    return str(env_or("FI_OCR_MODEL", load().ocr_model))
+
+
+def embed_model() -> str:
+    return str(env_or("FI_EMBED_MODEL", load().embed_model))
 
 
 def calendar_name() -> str:

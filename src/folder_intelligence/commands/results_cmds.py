@@ -35,7 +35,9 @@ class RefineResultsCommand(Command):
     params = ("text",)
     _START = re.compile(r"^(?:e\s+|and\s+)?(?:solo|soltanto|only|ordina|ordinali|sort|togli quelli|escludi|tranne|"
                         r"senza quelli|exclude|remove those|mostrali tutti|tutti i risultati|togli i filtri|"
-                        r"show all|clear filters|(?:del|dal|nel|from|of)\s+(?:19|20)\d\d$)")
+                        r"show all|clear filters|(?:del|dal|nel|from|of)\s+(?:19|20)\d\d$|"
+                        r"(?:quelli\s+|those\s+)?(?:sopra|sotto|oltre|piu di|meno di|tra|fra|above|over|under|below|"
+                        r"more than|less than|between)\s+(?:i\s+|the\s+)?(?:€\s*)?\d)")
 
     def match(self, req: Request):
         norm = req.norm.strip(" ?!.")

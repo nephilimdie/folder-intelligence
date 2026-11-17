@@ -125,8 +125,7 @@ class IdleIndexer:
             # 2) comprensione con l'AI dei file in attesa, un piccolo blocco alla volta
             pending = [p for p in di.pending_enrichment(limit=BATCH) if p.exists()]
             if not pending:
-                self._set(phase="done")
-                return 0
+                return await self._reembed(di, cancel)
             remaining = len(di.pending_enrichment())
 
             def progress(_phase, n, total, name=""):
@@ -148,3 +147,20 @@ class IdleIndexer:
             return done
         finally:
             self.cancel = None
+
+    async def _reembed(self, di, cancel: threading.Event) -> int:
+        """3) vettori mancanti (es. dopo un cambio del modello di ricerca), un blocco alla volta."""
+        from .vectors import EmbeddingStore, Reembedder
+
+        store = EmbeddingStore(di.index)
+        missing = store.count_missing()
+        if not missing:
+            self._set(phase="done")
+            return 0
+        self._set(phase="vectors", remaining=missing)
+        done = await Reembedder(store, di.ai).run(cancel=cancel)
+        if done:
+            di.index.flush(force=True)
+        if not done:
+            self._set(phase="done")  # niente motore per i vettori: non si insiste
+        return done
