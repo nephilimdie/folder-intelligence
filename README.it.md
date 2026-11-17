@@ -95,8 +95,23 @@ calendario, `FI_CALENDAR=off` lo disattiva. "fatto 2" segna la #2 come fatta, "r
 riapre, "elimina promemoria 2" la toglie. Salvata cifrata (`agenda.enc`); API: `GET/POST /agenda`,
 `PATCH/DELETE /agenda/{id}`.
 
+I **risultati delle ricerche** vanno in **box nella colonna di destra**, sotto Attività e Agenda, senza
+coprire la chat: ogni ricerca aggiunge un box e i precedenti restano (gli ultimi 5). Il box attivo è espanso
+(prima i 3 più pertinenti, poi per cartella, con l'anteprima del passaggio trovato), gli altri mostrano le
+prime righe. **F4** passa dalla chat ai box, **Tab/⇧Tab** cambiano box, **Esc** torna alla chat, **x** chiude
+un box. Dentro un box: Invio apre il file, spazio lo mostra in **Quick Look**, `f` lo mostra nel Finder, `c`
+copia il percorso, `?` fa una domanda su quel file, `e` mette i risultati nel Finder, `s` salva la ricerca,
+`/` scrive un filtro (i filtri a parole agiscono sul box selezionato). **Raffinare parlando**: "solo i pdf", "del 2024", "togli quelli in Downloads",
+"ordina per data", "mostrali tutti". **Risultati nel Finder**: "metti i risultati nel Finder" / "etichetta
+questi risultati come Bollette" aggiunge un'**etichetta del Finder** (nessun file spostato; default) oppure
+crea una **cartella di alias** (si sceglie nelle impostazioni, cartella `~/Risultati`). Così la ricerca viene
+anche salvata: i file nuovi che corrispondono si aggiungono col servizio in background. "salva questa
+ricerca come Viaggi", "ricerche salvate", "apri la ricerca Viaggi", "ricerche recenti", "togli l'etichetta
+Bollette". API: `GET /results/search` (filtri), `POST /results/finder`, `GET/POST /searches`,
+`POST /searches/{nome}/run`, `DELETE /searches/{nome}`.
+
 **Impostazioni** (`impostazioni`, o F3): le cartelle da indicizzare in automatico in background, quando
-farlo (inattivo da 2–30 minuti, solo con l'alimentazione collegata, solo se il Mac non sta facendo altro —
+farlo (le cartelle si scelgono nella finestra "Scegli cartella" di macOS, che parte dalla home; inattivo da 2–30 minuti, solo con l'alimentazione collegata, solo se il Mac non sta facendo altro —
 misurato sul carico medio della CPU), il modello per i riassunti, gli eventi nel Calendario, la lingua e la
 memoria MCP. Attivando "Indicizza in background" si installa il LaunchAgent; ogni modifica si salva subito
 (`settings.enc`, cifrato). "indicizza Documents in automatico" aggiunge una cartella direttamente dalla

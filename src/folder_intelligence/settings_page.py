@@ -111,6 +111,12 @@ class SettingsPage:
              "act": lambda: self.set_language(_cycle(settings.LANG_CHOICES, s.language))},
             {"kind": "choice", "label": _("Memoria MCP condivisa"), "value": _(MCP_LABELS[s.mcp_mode]),
              "act": lambda: self.set_mcp(_cycle(settings.MCP_CHOICES, s.mcp_mode))},
+            {"kind": "section", "label": _("Risultati delle ricerche")},
+            {"kind": "choice", "label": _("Mettili nel Finder come"), "value": _(DEST_LABELS[s.results_destination]),
+             "act": lambda: self.set(results_destination=_cycle(settings.DESTINATION_CHOICES,
+                                                                 s.results_destination))},
+            {"kind": "choice", "label": _("Cartella per gli alias"), "value": _short(s.aliases_folder),
+             "act": self.choose_aliases_folder},
         ]
         return rows
 
@@ -184,9 +190,33 @@ class SettingsPage:
             self.message = _("❗ Non riuscito: {error}", error=e)
 
     def start_adding(self) -> None:
-        self.adding = True
-        self.path_input.text = ""
-        self.tui.app.layout.focus(self.path_input)
+        """Finestra nativa di macOS per scegliere la cartella (parte dalla home);
+        se non è disponibile, campo di testo con completamento dei percorsi."""
+        import asyncio
+
+        async def pick() -> None:
+            folder = await asyncio.to_thread(choose_folder, _("Scegli una cartella da indicizzare in automatico"))
+            if folder is _UNAVAILABLE:
+                self.adding = True
+                self.path_input.text = ""
+                self.tui.app.layout.focus(self.path_input)
+            elif folder:
+                self._add(folder)
+            self.tui._invalidate()
+
+        self.message = _("Scegli la cartella nella finestra del Finder…")
+        asyncio.ensure_future(pick())
+
+    def choose_aliases_folder(self) -> None:
+        import asyncio
+
+        async def pick() -> None:
+            folder = await asyncio.to_thread(choose_folder, _("Dove creare le cartelle di alias dei risultati"))
+            if folder and folder is not _UNAVAILABLE:
+                self.set(aliases_folder=folder)
+            self.tui._invalidate()
+
+        asyncio.ensure_future(pick())
 
     def cancel_adding(self) -> None:
         self.adding = False
@@ -198,21 +228,50 @@ class SettingsPage:
         raw = unescape_path(buff.text.strip())
         self.adding = False
         self.tui.app.layout.focus(self.control)
-        if not raw:
-            return False
+        if raw:
+            self._add(raw)
+        return False
+
+    def _add(self, raw: str) -> None:
         try:
             s = settings.add_folder(raw)
         except NotADirectoryError:
             self.message = _("❗ La cartella {path} non esiste.", path=raw)
-            return False
+            return
         self.message = (_("Aggiunta. Verrà indicizzata in background quando il Mac è inattivo.")
                         if s.background_enabled else
                         _("Aggiunta. Attiva 'Indicizza in background' perché venga indicizzata da sola."))
-        return False
 
     def remove_folder(self, folder: str) -> None:
         settings.remove_folder(folder)
         self.message = _("Cartella tolta (quanto già indicizzato resta cercabile).")
+
+
+DEST_LABELS = {"tag": N_("etichetta del Finder"), "aliases": N_("cartella di alias")}
+_UNAVAILABLE = object()
+
+
+def choose_folder(prompt: str, start: str | None = None):
+    """Finestra "Scegli cartella" di macOS. Restituisce il percorso, None se annullata,
+    _UNAVAILABLE se la finestra non si può aprire (non macOS, osascript assente…)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    if sys.platform != "darwin":
+        return _UNAVAILABLE
+    start = start or str(Path.home())
+    script = ('on run argv\n'
+              '  set f to choose folder with prompt (item 1 of argv) default location (POSIX file (item 2 of argv))\n'
+              '  return POSIX path of f\n'
+              'end run')
+    try:
+        r = subprocess.run(["osascript", "-e", script, prompt, start], capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.SubprocessError):
+        return _UNAVAILABLE
+    if r.returncode != 0:
+        return None if "-128" in r.stderr else _UNAVAILABLE  # -128 = annullata dall'utente
+    return r.stdout.strip().rstrip("/") or None
 
 
 def _short(path: str) -> str:

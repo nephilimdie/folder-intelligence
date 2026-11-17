@@ -75,6 +75,7 @@ STYLE = Style.from_dict({
     "bar": "ansicyan",
     "bar.empty": "ansibrightblack",
     "status": "reverse",
+    "frame.box": "",
     "status.key": "reverse bold",
     "select": "reverse bold ansiyellow",
 })
@@ -272,7 +273,8 @@ class ChatTUI:
 
         def body():
             if self._columns() >= WIDE_MIN_COLUMNS:
-                side = HSplit([self.panel, self.agenda_panel, Window()], width=D(preferred=PANEL_WIDTH))
+                side = HSplit([self.panel, self.agenda_panel, DynamicContainer(self.results_area.container), Window()],
+                              width=D(preferred=PANEL_WIDTH))
                 return VSplit([HSplit([conversation, prompt_area]), side])
             # terminale stretto: i box stanno sopra l'input (che resta in fondo), solo se servono
             show = Condition(lambda: bool(self.jobs.active()))
@@ -283,14 +285,19 @@ class ChatTUI:
                            ConditionalContainer(Frame(self.agenda_window,
                                                       title=lambda: _("📅 Agenda ({n})", n=len(agenda.pending()))),
                                                 filter=show_agenda),
+                           DynamicContainer(self.results_area.container),
                            prompt_area])
 
         # pagina impostazioni: finestra sopra la conversazione (F3 o "impostazioni")
         from .settings_page import SettingsPage
 
+        from .results_page import ResultsArea
+
         self.settings_open = False
         self.settings_page = SettingsPage(self)
         settings_visible = Condition(lambda: self.settings_open)
+        # box dei risultati nella colonna di destra, uno per ricerca (F4 per entrarci)
+        self.results_area = ResultsArea(self)
         root = FloatContainer(
             content=HSplit([DynamicContainer(body),
                             Window(FormattedTextControl(self._render_status), height=1, style="class:status")]),
@@ -345,6 +352,14 @@ class ChatTUI:
         @kb.add("escape", filter=Condition(lambda: self.select_mode), eager=True)
         def _key_select_exit(e) -> None:
             self.toggle_select_mode()
+
+        @kb.add("f4")
+        def _key_results(e) -> None:
+            # dalla chat si entra nei box dei risultati; da un box si torna alla chat
+            if self.results_area.focused_box():
+                self.focus_chat()
+            else:
+                self.open_results()
 
         @kb.add("f3")
         def _key_settings(e) -> None:
@@ -547,6 +562,21 @@ class ChatTUI:
         self.app.layout.focus(self.settings_page.control)
         self._invalidate()
 
+    def open_results(self) -> None:
+        if not self.results_area.focus():
+            self.write(_("Nessuna ricerca da mostrare: scrivi 'cerca …'."), "info")
+
+    def focus_chat(self) -> None:
+        self.app.layout.focus(self.input)
+        self._invalidate()
+
+    def focus_input_with(self, text: str) -> None:
+        """Porta il cursore nella riga di input con un testo già scritto (il riquadro resta visibile)."""
+        self.input.text = text
+        self.input.buffer.cursor_position = len(text)
+        self.app.layout.focus(self.input)
+        self._invalidate()
+
     def close_settings(self) -> None:
         self.settings_open = False
         self.settings_page.adding = False
@@ -557,6 +587,8 @@ class ChatTUI:
         """Al massimo 3 scorciatoie, quelle utili in questo momento: (tasto, azione)."""
         if self.settings_open:
             return [("↑/↓", _("scegli")), (_("Invio"), _("cambia")), ("Esc", _("chiudi"))]
+        if self.results_area.focused_box():
+            return [(_("Invio"), _("apri")), ("Tab", _("box successivo")), ("Esc", _("chat"))]
         if self.confirms:
             return [("←/→", _("scegli")), (_("Invio"), _("conferma")), ("Esc", _("annulla"))]
         if self.select_mode:
@@ -770,7 +802,13 @@ class ChatTUI:
             # la domanda finale la mostra il selettore
             lines = text.rstrip().splitlines()
             text = "\n".join(line for line in lines if not is_question(line)).rstrip()
-        self.write_reply(text, style, job.result_data.get("command"))
+        if job.result_data.get("open_results") and job.status == DONE:
+            # i file vanno nel riquadro Risultati; in chat resta una riga di riepilogo
+            # il box appare a destra senza rubare il cursore: si continua a scrivere
+            self.write(job.result_data.get("summary") or text.splitlines()[0], "reply")
+            self._invalidate()
+        else:
+            self.write_reply(text, style, job.result_data.get("command"))
         if text.strip() and job.status == DONE and job.result_data.get("command") != "unknown":
             self.last_reply = text  # Ctrl+Y copia risposte vere, non "Non ho capito"
         if job.confirmation:

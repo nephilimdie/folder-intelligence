@@ -25,6 +25,7 @@ LOAD_CHOICES = ("low", "medium", "any")     # quanto deve essere "libero" il Mac
 LANG_CHOICES = ("auto", "it", "en")
 MCP_CHOICES = ("sealed", "summary", "off")
 INDEX_MODEL_CHOICES = ("qwen2.5:7b", "qwen2.5:14b")
+DESTINATION_CHOICES = ("tag", "aliases")     # risultati nel Finder: etichetta o cartella di alias
 
 
 @dataclass
@@ -40,6 +41,9 @@ class Settings:
     calendar: str = "folderIntelligence"   # "off" per non creare eventi
     language: str = "auto"
     mcp_mode: str = "sealed"
+    # risultati delle ricerche nel Finder
+    results_destination: str = "tag"
+    aliases_folder: str = "~/Risultati"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -98,6 +102,9 @@ def validate(s: Settings) -> None:
         s.language = "auto"
     if s.mcp_mode not in MCP_CHOICES:
         s.mcp_mode = "sealed"
+    if s.results_destination not in DESTINATION_CHOICES:
+        s.results_destination = "tag"
+    s.aliases_folder = s.aliases_folder or "~/Risultati"
     s.calendar = (s.calendar or "folderIntelligence").strip()
     folders: list[str] = []
     for f in s.watched_folders:

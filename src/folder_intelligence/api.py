@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import __version__, agenda, audit, completion, exporter, organizer, settings
+from . import __version__, agenda, audit, completion, exporter, organizer, results, settings
 from .ai import AIEngine, create_ai
 from .assistant import Assistant
 from .audit import app_home
@@ -100,6 +100,21 @@ class CommandRequest(BaseModel):
     wait: float = Field(2.0, ge=0, le=60, description="seconds to wait: if the command finishes earlier the "
                                                       "response is complete, otherwise 202 and the job continues "
                                                       "in the background")
+
+
+class FinderRequest(BaseModel):
+    paths: list[str]
+    name: str
+    mode: Literal["tag", "aliases"] | None = Field(None, description="default: the one chosen in the settings")
+    save_as_search: str | None = Field(None, description="query to save, so new matching files are added later")
+    root: str | None = None
+
+
+class SaveSearchRequest(BaseModel):
+    name: str
+    query: str
+    root: str
+    filters: dict[str, Any] = Field(default_factory=dict)
 
 
 class SettingsUpdate(BaseModel):
@@ -607,6 +622,55 @@ def create_app(
     @app.delete("/chat/{session_id}", tags=["chat"], dependencies=secured, status_code=204)
     async def end_chat(session_id: str) -> None:
         state.sessions.pop(session_id, None)
+
+    # ------------------------------------------------------------------ risultati
+    @app.get("/results/search", tags=["risultati"], dependencies=secured)
+    async def results_search(q: str, path: str, types: str | None = None, year: int | None = None,
+                             month: int | None = None, exclude: str | None = None,
+                             sort: Literal["relevance", "date", "name", "size"] = "relevance") -> dict[str, Any]:
+        """Ricerca con risultati raggruppabili e filtri (types: pdf,images,documents,sheets,…)."""
+        root = resolve_dir(path)
+        hits = await state.intelligence.search(q, root, results.MAX_HITS)
+        rs = results.ResultSet.from_search(q, root, hits, state.intelligence.index)
+        rs.filters = results.Filters(types=[t for t in (types or "").split(",") if t], year=year, month=month,
+                                     exclude=[e for e in (exclude or "").split(",") if e], sort=sort)
+        results.remember_query(q, str(root), len(rs.hits))
+        return {**rs.to_dict(), "groups": [{"title": t, "paths": [h.path for h in g]} for t, g in rs.groups()]}
+
+    @app.post("/results/finder", tags=["risultati"], dependencies=secured)
+    async def results_finder(req: FinderRequest) -> dict[str, Any]:
+        """Mette i file nel Finder: etichetta o cartella di alias (nessun file spostato)."""
+        res = await run_blocking(results.to_finder, req.paths, req.name, req.mode, False)
+        if req.save_as_search and req.root:
+            rs = results.ResultSet(query=req.save_as_search, root=req.root, hits=[])
+            results.save_search(rs, results.safe_name(req.name), destination=res["mode"], paths=req.paths)
+        return res
+
+    @app.get("/searches", tags=["risultati"], dependencies=secured)
+    async def searches_list() -> dict[str, Any]:
+        return {"saved": [s.__dict__ for s in results.saved()], "history": results.history()}
+
+    @app.post("/searches", tags=["risultati"], dependencies=secured, status_code=201)
+    async def searches_save(req: SaveSearchRequest) -> dict[str, Any]:
+        rs = results.ResultSet(query=req.query, root=req.root, hits=[], filters=results.Filters(**req.filters))
+        return results.save_search(rs, results.safe_name(req.name)).__dict__
+
+    @app.post("/searches/{name}/run", tags=["risultati"], dependencies=secured)
+    async def searches_run(name: str) -> dict[str, Any]:
+        entry = results.get_saved(name)
+        if entry is None:
+            raise HTTPException(404, _("Non trovo una ricerca salvata «{name}». Scrivi 'ricerche salvate' per "
+                                       "l'elenco.", name=name))
+        return (await results.run_saved(entry, state.intelligence)).to_dict()
+
+    @app.delete("/searches/{name}", tags=["risultati"], dependencies=secured, status_code=204)
+    async def searches_delete(name: str, untag: bool = False) -> None:
+        entry = results.delete_saved(name)
+        if entry is None:
+            raise HTTPException(404, _("Non trovo una ricerca salvata «{name}». Scrivi 'ricerche salvate' per "
+                                       "l'elenco.", name=name))
+        if untag:
+            await run_blocking(results.remove_from_finder, entry.paths, entry.name)
 
     # ------------------------------------------------------------------ impostazioni
     @app.get("/settings", tags=["impostazioni"], dependencies=secured)

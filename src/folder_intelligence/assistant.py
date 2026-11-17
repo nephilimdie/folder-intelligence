@@ -74,6 +74,8 @@ class Assistant:
         self.index_limit = index_limit
         self.status = status or (lambda _msg: None)
         self.notify: Callable[[str], None] | None = None  # messaggi intermedi (es. "ricerca pronta")
+        # stato condiviso tra la sessione e le sue copie (fork) delle attività in background
+        self.shared: dict[str, Any] = {"last_results": None, "result_sets": []}
         self.source = source
         self.progress = progress
         self.classifier = FileClassifier(self.ai)
@@ -212,6 +214,20 @@ class Assistant:
 
     def invalidate(self) -> None:
         self.scans.clear()
+
+    @property
+    def last_results(self):
+        """Ultima ricerca (results.ResultSet): filtri a parole, Finder, salvataggio."""
+        return self.shared.get("last_results")
+
+    @last_results.setter
+    def last_results(self, value) -> None:
+        """Una ricerca nuova si aggiunge alla pila dei risultati (le precedenti restano)."""
+        self.shared["last_results"] = value
+        sets = self.shared.setdefault("result_sets", [])
+        if value is not None and not any(rs is value for rs in sets):
+            sets.append(value)
+            del sets[:-10]
 
     def fork(self, progress: Callable[..., None] | None = None,
              status: Callable[[str], None] | None = None) -> "Assistant":

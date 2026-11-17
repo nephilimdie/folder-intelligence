@@ -134,3 +134,27 @@ def test_settings_api(tmp_path, monkeypatch):
     r = c.post("/settings/background", json={"enabled": True}, headers=h).json()
     assert r["background_enabled"] is True and "background" in r
     assert c.delete("/settings/folders", params={"path": str(tmp_path)}, headers=h).json()["watched_folders"] == []
+
+
+def test_native_folder_picker(monkeypatch):
+    """'+ aggiungi una cartella' apre la finestra di macOS che parte dalla home."""
+    import subprocess
+    from pathlib import Path
+
+    from folder_intelligence import settings_page
+
+    seen = {}
+
+    def fake(args, **kw):
+        seen["args"] = args
+        return subprocess.CompletedProcess(args, 0, stdout="/Users/x/Documents/\n", stderr="")
+
+    monkeypatch.setattr(settings_page.sys if hasattr(settings_page, "sys") else __import__("sys"), "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert settings_page.choose_folder("Scegli") == "/Users/x/Documents"
+    assert "choose folder" in seen["args"][2] and seen["args"][-1] == str(Path.home())  # parte dalla home
+    monkeypatch.setattr(subprocess, "run", lambda a, **k: subprocess.CompletedProcess(
+        a, 1, stdout="", stderr="execution error: User canceled. (-128)"))
+    assert settings_page.choose_folder("Scegli") is None  # annullata: niente da fare
+    monkeypatch.setattr(subprocess, "run", lambda a, **k: subprocess.CompletedProcess(a, 1, stdout="", stderr="boom"))
+    assert settings_page.choose_folder("Scegli") is settings_page._UNAVAILABLE  # ripiego: campo di testo

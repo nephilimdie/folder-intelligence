@@ -1,3 +1,6 @@
+import re
+from pathlib import Path
+
 from ..i18n import N_, _
 from ..intents import Intent
 from .base import Command, CommandResult, Request
@@ -17,12 +20,34 @@ class AskCommand(Command):
     params = ("query",)
 
     def match(self, req: Request):
+        # "su «fattura.pdf»: quanto ho pagato?" — domanda su un file preciso (tasto ? nei Risultati)
+        m = re.match(r"^\s*(?:su|about)\s+«(.+?)»\s*:\s*(.+)$", req.text, re.I)
+        if m:
+            return {"file": m.group(1), "query": m.group(2).strip(), "path": None}
         if req.norm.endswith("?") or req.norm.startswith(QUESTION_START):
             return {"query": req.text.strip()}
         return None
 
+    @staticmethod
+    def _target_file(ctx, name):
+        if not name:
+            return None
+        rs = ctx.last_results
+        for h in (rs.hits if rs else []):
+            if h.name == name or h.path == name:
+                return h.path
+        p = Path(name).expanduser()
+        return str(p) if p.is_file() else None
+
     async def run(self, ctx, intent: Intent) -> str:
         question = str(intent.args.get("query") or "").strip()
+        target = self._target_file(ctx, intent.args.get("file"))
+        if target:
+            ctx.status(_("Leggo {name} …", name=Path(target).name))
+            answer, hits = await ctx.intelligence.ask(question, paths=[target])
+            if hits:
+                return CommandResult(answer or _("Non riesco a formulare una risposta (AI non disponibile)."),
+                                     {"question": question, "answer": answer, "file": target})
         scan = await ctx.get_scan(intent.path)
         # cartella non indicizzata ma altre sì: rispondiamo con tutto l'indice invece di chiedere
         everywhere = ctx.globally_indexed(scan.root)

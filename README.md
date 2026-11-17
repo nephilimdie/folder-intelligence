@@ -94,8 +94,22 @@ permission (Privacy & Security → Automation). `FI_CALENDAR=<name>` picks anoth
 reopens it, "delete reminder 2" removes it. Stored encrypted (`agenda.enc`); API: `GET/POST /agenda`,
 `PATCH/DELETE /agenda/{id}`.
 
+**Search results** go into **boxes in the right column**, under Activity and Agenda, without covering
+the chat: every search adds a box and the previous ones stay (the last 5). The active box is expanded
+(the 3 most relevant first, then grouped by folder, with a preview of the matching passage), the others
+show their first lines. **F4** moves from the chat into the boxes, **Tab/⇧Tab** switch box, **Esc**
+goes back to the chat, **x** closes a box. Inside a box: Enter opens the file, space shows it in
+**Quick Look**, `f` reveals it in Finder, `c` copies the path, `?` asks about that file, `e` puts the
+results in Finder, `s` saves the search, `/` types a filter (word filters act on the selected box). **Refine by talking**: "only the pdfs", "from 2024", "exclude those in Downloads",
+"sort by date", "show all". **Put the results in Finder**: "put the results in Finder" / "tag these
+results as Bills" adds a **Finder tag** (no file moved; default) or creates a **folder of aliases**
+(choose in the settings, folder `~/Risultati`). That also saves the search: new matching files are added
+by the background service. "save this search as Trips", "saved searches", "open the search Trips",
+"recent searches", "remove the tag Bills". API: `GET /results/search` (filters), `POST /results/finder`,
+`GET/POST /searches`, `POST /searches/{name}/run`, `DELETE /searches/{name}`.
+
 **Settings** (`settings`, or F3): the folders to index automatically in the background, when to do it
-(idle for 2–30 minutes, only when plugged in, only when the Mac isn't doing anything else — measured
+(folders are chosen in the native macOS "Choose folder" window, starting from home; idle for 2–30 minutes, only when plugged in, only when the Mac isn't doing anything else — measured
 on the CPU load average), the summary model, Calendar events, language and MCP memory. Turning on
 "Index in the background" installs the LaunchAgent; every change is saved immediately (encrypted
 `settings.enc`). "index Documents automatically" adds a folder straight from the chat. The service

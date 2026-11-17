@@ -471,10 +471,14 @@ class DocumentIntelligence:
         self._expansions[key] = words
         return words
 
-    async def ask(self, question: str, root: Path | None = None, names: list[Path] | None = None
-                  ) -> tuple[str, list[Hit]]:
-        """Risponde a una domanda usando i documenti più pertinenti (RAG locale)."""
-        hits = [h for h in await self.search(question, root, 8, names, precise=False) if h.doc]
+    async def ask(self, question: str, root: Path | None = None, names: list[Path] | None = None,
+                  paths: list[str] | None = None) -> tuple[str, list[Hit]]:
+        """Risponde a una domanda usando i documenti più pertinenti (RAG locale).
+        Con `paths` la risposta si basa solo su quei file (es. "? " dal riquadro Risultati)."""
+        if paths:
+            hits = [Hit(p, 1.0, d) for p in paths if (d := self.index.get(p))]
+        else:
+            hits = [h for h in await self.search(question, root, 8, names, precise=False) if h.doc]
         if not hits:
             return "", []
         if not (self.ai and await self.ai.is_available()):

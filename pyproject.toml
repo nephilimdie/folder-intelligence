@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "folder-intelligence"
-version = "1.11.0"
+version = "1.13.0"
 description = "Local AI assistant for your Mac folders: understands your files, finds duplicates and similar photos, searches by meaning and tidies up safely."
 readme = "README.md"
 license = "MIT"

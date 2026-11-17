@@ -2,7 +2,11 @@ import re
 
 from ..i18n import N_, _
 from ..intents import Intent, normalize
+from pathlib import Path
+
+from .. import results
 from ..models import format_size
+from ..results import MAX_HITS
 from .base import Command, CommandResult, Request
 
 
@@ -29,12 +33,12 @@ class SearchCommand(Command):
         if not query:
             return _("Cosa devo cercare? Es. 'cerca fattura' o 'cerca le foto del mare'.")
         scan = await ctx.get_scan(intent.path)
-        hits = await ctx.intelligence.search(query, scan.root, 20, names=[f.path for f in scan.files])
+        hits = await ctx.intelligence.search(query, scan.root, MAX_HITS, names=[f.path for f in scan.files])
         elsewhere = False
         if not hits and ctx.intelligence.index.stats()["documents"]:
             # niente qui: proviamo in tutte le cartelle già indicizzate (es. Documents indicizzata,
             # ma la cartella di lavoro è ancora Downloads)
-            hits = [h for h in await ctx.intelligence.search(query, None, 20)
+            hits = [h for h in await ctx.intelligence.search(query, None, MAX_HITS)
                     if not h.path.startswith(str(scan.root) + "/")]
             elsewhere = bool(hits)
 
@@ -84,4 +88,15 @@ class SearchCommand(Command):
                                         _("cercare anche dentro documenti e immagini"))
             if q:
                 lines.append("\n" + q)
+        # i risultati diventano un oggetto della sessione: riquadro, filtri a parole, Finder, salvataggio
+        if hits:
+            rs = results.ResultSet.from_search(query, None if elsewhere else scan.root, hits, ctx.intelligence.index)
+            if elsewhere:
+                rs.root = str(Path.home())
+            ctx.last_results = rs
+            results.remember_query(query, rs.root, len(rs.hits))
+            data["results"] = rs.to_dict()
+            data["open_results"] = not ctx.pending  # se c'è una domanda in sospeso, prima quella
+            data["summary"] = _("🔎 {n} file per «{query}» → box {box} a destra (F4 per selezionarlo).",
+                                n=len(rs.hits), query=query, box=len(ctx.shared.get("result_sets", [])))
         return CommandResult("\n".join(lines), data)

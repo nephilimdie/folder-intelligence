@@ -150,7 +150,13 @@ async def run_service(once: bool = False, ai=None) -> int:
             new = await _refresh_watched(di)
             if new:
                 _log(f"cartelle sorvegliate: {new} file nuovi o modificati resi cercabili")
-            # 2) comprensione con l'AI dei file in attesa
+            # 2) ricerche salvate messe nel Finder: i file nuovi che corrispondono si aggiungono
+            from . import results
+
+            tagged = await results.refresh_saved(di)
+            if tagged:
+                _log(f"ricerche salvate: {tagged} file nuovi aggiunti nel Finder")
+            # 3) comprensione con l'AI dei file in attesa
             pending = [p for p in di.pending_enrichment(limit=BATCH) if p.exists()]
             if not pending:
                 _log("niente da completare")
