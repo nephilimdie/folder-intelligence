@@ -424,3 +424,7 @@ Variabili d'ambiente: `FI_OLLAMA_URL`, `FI_OLLAMA_MODEL`, `FI_VISION_MODEL`, `FI
 ```bash
 .venv/bin/python -m pytest
 ```
+
+## Licenza
+
+MIT — vedi [LICENSE](LICENSE).
