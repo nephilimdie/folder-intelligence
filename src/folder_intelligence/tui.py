@@ -69,6 +69,7 @@ STYLE = Style.from_dict({
     "bar": "ansicyan",
     "bar.empty": "ansibrightblack",
     "status": "reverse",
+    "select": "reverse bold ansiyellow",
 })
 
 
@@ -121,6 +122,9 @@ class ChatTUI:
         self.confirms: deque[Confirmation] = deque()
         self.tick = 0
         self.last_ctrl_c = 0.0
+        self.mouse = mouse
+        self.select_mode = False   # Ctrl+T / F2: mouse al terminale per selezionare e copiare testo
+        self.last_reply = ""
         self.exit_code = 0
 
         for line in header:
@@ -250,6 +254,15 @@ class ChatTUI:
         def _key11(e) -> None:
             self.scroll_by(-1)
 
+        @kb.add("c-t")
+        @kb.add("f2")
+        def _key_select(e) -> None:
+            self.toggle_select_mode()
+
+        @kb.add("c-y")
+        def _key_copy(e) -> None:
+            self.copy_last_reply()
+
         @kb.add("escape", filter=scrolled & ~has_confirm, eager=True)
         @kb.add("end", filter=scrolled & ~has_confirm & Condition(lambda: not self.input.text))
         def _key12(e) -> None:
@@ -257,7 +270,9 @@ class ChatTUI:
 
         self.app: Application = Application(
             layout=Layout(root, focused_element=self.input), key_bindings=kb, style=STYLE,
-            full_screen=True, mouse_support=mouse,
+            full_screen=True,
+            # il mouse si "cattura" (rotellina) tranne in modalità selezione: lì lo gestisce il terminale
+            mouse_support=Condition(lambda: self.mouse and not self.select_mode),
         )
         jobs.subscribe(self._on_jobs_changed)
 
@@ -370,11 +385,11 @@ class ChatTUI:
         out: list[tuple[str, str]] = []
         style = {"overdue": "class:overdue", "today": "class:today", "soon": "class:due", "later": "class:due"}
         for item in todo[:AGENDA_MAX_LINES]:
-            when = agenda.format_due(item.due_date)
+            when = agenda.format_due(item.when)
             st = item.status()
             mark = "⚠" if st == "overdue" else "●" if st == "today" else " "
             head = f"{mark}#{item.id} "
-            date_col = f"{when:<10} " if when else ""
+            date_col = f"{when:<10} " if when else ""  # "domani 18:30", "ven 20 nov"
             text = item.text if len(head + date_col + item.text) <= width else \
                 item.text[: max(4, width - len(head + date_col) - 1)] + "…"
             out += [("class:info", head), (style.get(st, ""), date_col), ("", text + "\n")]
@@ -388,9 +403,34 @@ class ChatTUI:
     def _render_status(self) -> FormattedText:
         n = len(self.jobs.active())
         jobs = " " + _("⏳ {n} in corso", n=n) + " " if n else ""
+        if self.select_mode:
+            return FormattedText([("class:select", " " + _("✂️  Modalità selezione: trascina col mouse e copia con ⌘C · "
+                                                          "Ctrl+T per tornare (rotellina) · Ctrl+Y copia l'ultima risposta")
+                                   + " ")])
         return FormattedText([("class:status", f" 📁 {self.assistant.directory}  {jobs}"),
-                              ("class:status", "  " + _("Tab completa · ↑/↓ storico · rotella/PagSu scorre · "
-                                                       "Ctrl+C ferma · Ctrl+D esce") + " ")])
+                              ("class:status", "  " + _("Ctrl+T seleziona testo · Ctrl+Y copia risposta · Tab completa · "
+                                                       "↑/↓ storico · Ctrl+C ferma · Ctrl+D esce") + " ")])
+
+    # ============================================================ selezione testo
+    def toggle_select_mode(self) -> None:
+        if not self.mouse:
+            self.write(_("Il mouse è già lasciato al terminale (--no-mouse): seleziona pure il testo."), "info")
+            return
+        self.select_mode = not self.select_mode
+        self.write(_("✂️  Modalità selezione attiva: trascina per selezionare, ⌘C per copiare. Ctrl+T per tornare.")
+                   if self.select_mode else _("🖱️  Rotellina di nuovo attiva."), "info")
+
+    def copy_last_reply(self) -> None:
+        import subprocess
+
+        if not self.last_reply:
+            self.write(_("Non c'è ancora una risposta da copiare."), "info")
+            return
+        try:
+            subprocess.run(["pbcopy"], input=self.last_reply.encode(), check=True, timeout=5)
+            self.write(_("📋 Ultima risposta copiata negli appunti."), "info")
+        except (OSError, subprocess.SubprocessError):
+            self.write(_("Impossibile copiare negli appunti (pbcopy non disponibile)."), "err")
 
     def _on_jobs_changed(self) -> None:
         self._invalidate()
@@ -540,6 +580,8 @@ class ChatTUI:
             lines = text.rstrip().splitlines()
             text = "\n".join(line for line in lines if not is_question(line)).rstrip()
         self.write(text, style)
+        if text.strip():
+            self.last_reply = text
         if job.confirmation:
             self._confirm_job(job)
         if job.result_data.get("command") == "exit":

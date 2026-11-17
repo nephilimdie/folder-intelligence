@@ -84,15 +84,19 @@ Ctrl+C ferma l'ultima, Ctrl+D o `esci` chiude (chiedendo conferma se ci sono att
 Sotto il box Attività c'è l'**📅 Agenda**: le cose da fare aggiunte dalla chat ("ricordami di pagare
 l'affitto domani", "aggiungi all'agenda rinnovare la patente il 20 dicembre"), in ordine di data —
 scadute in rosso, quelle di oggi evidenziate, poi le prossime, poi quelle senza data; le ultime fatte
-compaiono in grigio. Date capite in italiano e inglese: oggi/domani/dopodomani, giorni della settimana,
-"tra 3 giorni", "il 20 novembre", "20/12", "2026-12-20". "fatto 2" segna la #2 come fatta, "riapri 2" la
+compaiono in grigio. Ogni richiesta di promemoria va in agenda (restano note solo le frasi informative
+come "ricordati che …"); **senza data, la scadenza è tra 6 ore**. Date e orari capiti in italiano e
+inglese: oggi/domani/dopodomani, giorni della settimana, "tra 3 giorni", "il 20 novembre", "20/12",
+"2026-12-20", "alle 15", "alle 15:30". "fatto 2" segna la #2 come fatta, "riapri 2" la
 riapre, "elimina promemoria 2" la toglie. Salvata cifrata (`agenda.enc`); API: `GET/POST /agenda`,
 `PATCH/DELETE /agenda/{id}`.
 
 Per rileggere la conversazione: **rotellina/trackpad**, PagSu/PagGiù o ⇧↑/⇧↓; Esc o Fine tornano
 in fondo. Se arrivano risultati mentre stai leggendo più in alto, la vista resta ferma e compare
-l'avviso "● nuovi messaggi". Poiché l'app riceve il mouse, per **selezionare testo** tieni premuto
-⌥ Option mentre trascini; in alternativa avvia con `--no-mouse` (o `FI_MOUSE=0`).
+l'avviso "● nuovi messaggi". Poiché l'app cattura il mouse per la rotellina, premi
+**Ctrl+T** (o F2) per **selezionare testo**: il mouse torna al terminale (trascina, ⌘C), e Ctrl+T di
+nuovo riattiva la rotellina. **Ctrl+Y** copia negli appunti l'ultima risposta. `--no-mouse` non cattura
+mai il mouse.
 
 Nella chat:
 - **Tab** completa cartelle (`~/Doc` → `~/Documents/`, anche con spazi: `Foto\ Vacanze/`) e comandi (`trov` → `trovami i duplicati`);

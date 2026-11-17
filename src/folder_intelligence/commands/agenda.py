@@ -9,7 +9,7 @@ _REF = r"#?\s*(\d{1,4})"
 
 
 def item_line(item: agenda.Item) -> str:
-    when = agenda.format_due(item.due_date)
+    when = agenda.format_due(item.when)
     mark = {"overdue": "⚠️ ", "today": "🔔 ", "done": "✅ "}.get(item.status(), "• ")
     return f"  {mark}#{item.id}  " + (f"{when} — " if when else "") + item.text
 

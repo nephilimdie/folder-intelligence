@@ -31,7 +31,7 @@ WEEKDAYS_SHORT = {"it": ["lun", "mar", "mer", "gio", "ven", "sab", "dom"],
 class Item:
     id: int
     text: str
-    due: str | None = None          # "AAAA-MM-GG"
+    due: str | None = None          # "AAAA-MM-GG" oppure "AAAA-MM-GGTHH:MM" (con orario)
     done: bool = False
     created: str = ""
     done_at: str | None = None
@@ -39,11 +39,25 @@ class Item:
     @property
     def due_date(self) -> date | None:
         try:
-            return date.fromisoformat(self.due) if self.due else None
+            return date.fromisoformat(self.due[:10]) if self.due else None
         except ValueError:
             return None
 
-    def status(self, today: date | None = None) -> str:
+    @property
+    def due_at(self) -> datetime | None:
+        """Data e ora, se la scadenza ha un orario."""
+        if not self.due or "T" not in self.due:
+            return None
+        try:
+            return datetime.fromisoformat(self.due)
+        except ValueError:
+            return None
+
+    @property
+    def when(self) -> date | datetime | None:
+        return self.due_at or self.due_date
+
+    def status(self, today: date | None = None, now: datetime | None = None) -> str:
         """'done' | 'overdue' | 'today' | 'soon' (entro 7 giorni) | 'later' | 'undated'."""
         today = today or date.today()
         if self.done:
@@ -51,6 +65,9 @@ class Item:
         d = self.due_date
         if d is None:
             return "undated"
+        at = self.due_at
+        if at is not None and at < (now or datetime.now()) and d <= today:
+            return "overdue"
         if d < today:
             return "overdue"
         if d == today:
@@ -58,7 +75,7 @@ class Item:
         return "soon" if (d - today).days <= 7 else "later"
 
     def to_dict(self) -> dict[str, Any]:
-        return {**asdict(self), "status": self.status(), "due_label": format_due(self.due_date)}
+        return {**asdict(self), "status": self.status(), "due_label": format_due(self.due_at or self.due_date)}
 
 
 def path() -> Path:
@@ -96,11 +113,19 @@ def _save(items: list[Item]) -> None:
         _cache = (str(path()), path().stat().st_mtime, list(items))
 
 
-def add(text: str, due: date | None = None) -> Item:
+def _iso(due: date | datetime | None) -> str | None:
+    if due is None:
+        return None
+    if isinstance(due, datetime):
+        return due.isoformat(timespec="minutes")
+    return due.isoformat()
+
+
+def add(text: str, due: date | datetime | None = None) -> Item:
     with _lock:
         items = load()
         item = Item(id=max((i.id for i in items), default=0) + 1, text=text.strip(),
-                    due=due.isoformat() if due else None, created=datetime.now().isoformat(timespec="seconds"))
+                    due=_iso(due), created=datetime.now().isoformat(timespec="seconds"))
         items.append(item)
         _save(items)
         return item
@@ -137,7 +162,7 @@ def remove(ref: int | str) -> Item | None:
     return None
 
 
-def update(ref: int | str, text: str | None = None, due: date | None | str = "keep") -> Item | None:
+def update(ref: int | str, text: str | None = None, due: date | datetime | None | str = "keep") -> Item | None:
     with _lock:
         items = load()
         for i in items:
@@ -145,7 +170,7 @@ def update(ref: int | str, text: str | None = None, due: date | None | str = "ke
                 if text:
                     i.text = text.strip()
                 if due != "keep":
-                    i.due = due.isoformat() if isinstance(due, date) else None
+                    i.due = _iso(due) if isinstance(due, date) else None
                 _save(items)
                 return i
     return None
@@ -165,10 +190,15 @@ def recently_done(limit: int = 3) -> list[Item]:
     return sorted(done, key=lambda i: i.done_at or "", reverse=True)[:limit]
 
 
-def format_due(d: date | None, today: date | None = None) -> str:
-    """'oggi', 'domani', 'ven 20 nov', '3 gen 2027' (nella lingua corrente)."""
-    if d is None:
+def format_due(when: date | datetime | None, today: date | None = None) -> str:
+    """'oggi 18:30', 'domani', 'ven 20 nov', '3 gen 2027' (nella lingua corrente)."""
+    if when is None:
         return ""
+    clock = f" {when:%H:%M}" if isinstance(when, datetime) else ""
+    return _format_day(when.date() if isinstance(when, datetime) else when, today) + clock
+
+
+def _format_day(d: date, today: date | None = None) -> str:
     today = today or date.today()
     code = lang() if lang() in MONTHS_SHORT else "en"
     delta = (d - today).days

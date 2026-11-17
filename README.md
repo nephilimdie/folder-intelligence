@@ -83,15 +83,18 @@ When it finishes, the result appears in the conversation (with a confirmation se
 Under the Activity box there is the **📅 Agenda**: the things to do you add from the chat
 ("remind me to pay the rent tomorrow", "add to my agenda renew the passport on Dec 20"), ordered by
 date — overdue in red, today highlighted, then upcoming ones, then those without a date; the last
-ones done appear greyed out. Dates are understood in English and Italian: today/tomorrow, weekdays,
-"in 3 days", "Nov 20", "20/12" (day/month), "2026-12-20". "done 2" marks #2 as done, "reopen 2"
+ones done appear greyed out. Every request to be reminded goes into the agenda (only statements like
+"remember that …" stay notes); **without a date it is due in 6 hours**. Dates and times are understood
+in English and Italian: today/tomorrow, weekdays, "in 3 days", "Nov 20", "20/12" (day/month),
+"2026-12-20", "at 3pm", "at 15:30". "done 2" marks #2 as done, "reopen 2"
 reopens it, "delete reminder 2" removes it. Stored encrypted (`agenda.enc`); API: `GET/POST /agenda`,
 `PATCH/DELETE /agenda/{id}`.
 
 To read back: **mouse wheel/trackpad**, PgUp/PgDn or ⇧↑/⇧↓; Esc or End jump to the bottom. If
 results arrive while you are reading further up, the view stays put and "● new messages" appears.
-Since the app captures the mouse, hold ⌥ Option while dragging to **select text**, or start with
-`--no-mouse` (or `FI_MOUSE=0`).
+Since the app captures the mouse for the wheel, press **Ctrl+T** (or F2) to **select text**: the
+mouse goes back to the terminal (drag, ⌘C), Ctrl+T again restores the wheel. **Ctrl+Y** copies the
+last answer to the clipboard. `--no-mouse` never captures the mouse.
 
 In the chat:
 - **Tab** completes folders (`~/Doc` → `~/Documents/`, spaces too: `Holiday\ Photos/`) and commands (`find d` → `find duplicates`);

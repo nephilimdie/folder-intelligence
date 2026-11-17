@@ -95,3 +95,51 @@ def test_api(tmp_path):
     assert c.patch("/agenda/99", json={"done": True}, headers=h).status_code == 404
     assert c.post("/agenda", json={"text": "x", "due": "domani"}, headers=h).status_code == 422
     assert c.delete(f"/agenda/{item['id']}", headers=h).status_code == 204
+
+
+def test_reported_phrase_goes_into_the_agenda_with_default_due(tmp_path):
+    """Bug: 'mi ricordi di … perfavore?' finiva tra le note senza data."""
+    from datetime import datetime
+
+    a = Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False)
+    before = datetime.now()
+    out = asyncio.run(a.handle("mi ricordi di cercare i documenti della casa di milano perfavore?"))
+    assert "Aggiunto all'agenda (#1): cercare i documenti della casa di milano" in out
+    item = agenda.find(1)
+    assert item.due_at is not None and 5.9 * 3600 < (item.due_at - before).total_seconds() < 6.1 * 3600
+    # se il comando arriva dal router AI senza indicazioni, vale lo stesso
+    from folder_intelligence.intents import Intent
+
+    out = asyncio.run(a.run_intent(Intent("remember", args={"text": "chiamare l'idraulico"})))
+    assert "Aggiunto all'agenda (#2)" in out
+
+
+def test_times_are_understood():
+    from datetime import datetime
+
+    from folder_intelligence.dates import parse_when
+
+    now = datetime(2026, 11, 17, 12, 51)
+    assert parse_when("pagare l'affitto venerdì alle 10", now) == (datetime(2026, 11, 20, 10, 0), "pagare l'affitto")
+    assert parse_when("chiamare il notaio alle 15:30", now) == (datetime(2026, 11, 17, 15, 30), "chiamare il notaio")
+    assert parse_when("backup alle 9", now) == (datetime(2026, 11, 18, 9, 0), "backup")  # le 9 sono passate
+    assert parse_when("call the bank tomorrow at 3pm", now) == (datetime(2026, 11, 18, 15, 0), "call the bank")
+    assert parse_when("leggere", now) == (datetime(2026, 11, 17, 18, 51), "leggere")  # +6 ore
+
+
+def test_selection_mode_releases_the_mouse(tmp_path, monkeypatch):
+    from folder_intelligence.jobs import JobManager
+    from folder_intelligence.tui import ChatTUI
+
+    ui = ChatTUI(Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False), JobManager(), [])
+    assert ui.app.mouse_support() is True
+    ui.toggle_select_mode()
+    assert ui.app.mouse_support() is False and "Modalità selezione" in "".join(t for _s, t in ui._render_status())
+    ui.toggle_select_mode()
+    assert ui.app.mouse_support() is True
+
+    copied = {}
+    monkeypatch.setattr("subprocess.run", lambda args, input, **kw: copied.setdefault("text", input))
+    ui.last_reply = "risposta da copiare"
+    ui.copy_last_reply()
+    assert copied["text"] == b"risposta da copiare"

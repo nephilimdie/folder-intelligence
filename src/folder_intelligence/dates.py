@@ -12,7 +12,7 @@ import calendar
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 MONTHS = {
     # italiano
@@ -173,3 +173,51 @@ def parse_due(text: str, today: date | None = None) -> tuple[date | None, str]:
             if d >= today:
                 return d, cut(m)
     return None, original.strip()
+
+
+# --------------------------------------------------------------------- orari
+_TIME_RE = re.compile(
+    r"\b(?:alle|alle ore|ore|verso le|at|by|around)\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?(?!\s*(?:/|-|\d))"
+    r"|\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.I)
+
+
+def parse_time(text: str) -> tuple[time | None, str]:
+    """'chiamare il notaio alle 15:30' → (15:30, 'chiamare il notaio'); 'at 3pm' → 15:00."""
+    m = _TIME_RE.search(text)
+    if not m:
+        return None, text
+    hour = int(m[1] or m[4])
+    minute = int(m[2] or m[5] or 0)
+    ampm = (m[3] or m[6] or "").lower().replace(".", "")
+    if ampm == "pm" and hour < 12:
+        hour += 12
+    if ampm == "am" and hour == 12:
+        hour = 0
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None, text
+    rest = (text[: m.start()] + text[m.end():]).strip()
+    return time(hour, minute), re.sub(r"\s{2,}", " ", rest).strip(" ,.")
+
+
+DEFAULT_DUE_HOURS = 6
+
+
+def parse_when(text: str, now: datetime | None = None,
+               default_hours: float | None = DEFAULT_DUE_HOURS) -> tuple[date | datetime | None, str]:
+    """Data e ora di un promemoria.
+
+    - "domani alle 9" → datetime; "venerdì" → date; "alle 15" → oggi alle 15 (o domani se già passato);
+    - nessuna data: `now + default_hours` (None per non mettere una scadenza)."""
+    now = now or datetime.now()
+    at, rest = parse_time(text)
+    day, rest = parse_due(rest, now.date())
+    if day is not None and at is not None:
+        return datetime.combine(day, at), rest
+    if day is not None:
+        return day, rest
+    if at is not None:
+        when = datetime.combine(now.date(), at)
+        return (when if when > now else when + timedelta(days=1)), rest
+    if default_hours:
+        return (now + timedelta(hours=default_hours)).replace(second=0, microsecond=0), rest
+    return None, rest
