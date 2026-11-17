@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import __version__, agenda, audit, completion, exporter, organizer
+from . import __version__, agenda, audit, completion, exporter, organizer, settings
 from .ai import AIEngine, create_ai
 from .assistant import Assistant
 from .audit import app_home
@@ -100,6 +100,24 @@ class CommandRequest(BaseModel):
     wait: float = Field(2.0, ge=0, le=60, description="seconds to wait: if the command finishes earlier the "
                                                       "response is complete, otherwise 202 and the job continues "
                                                       "in the background")
+
+
+class SettingsUpdate(BaseModel):
+    idle_minutes: int | None = None
+    require_ac_power: bool | None = None
+    max_system_load: Literal["low", "medium", "any"] | None = None
+    index_model: str | None = None
+    calendar: str | None = Field(None, description='calendar name, or "off"')
+    language: Literal["auto", "it", "en"] | None = None
+    mcp_mode: Literal["sealed", "summary", "off"] | None = None
+
+
+class FolderRequest(BaseModel):
+    path: str
+
+
+class BackgroundRequest(BaseModel):
+    enabled: bool
 
 
 class AgendaRequest(BaseModel):
@@ -589,6 +607,43 @@ def create_app(
     @app.delete("/chat/{session_id}", tags=["chat"], dependencies=secured, status_code=204)
     async def end_chat(session_id: str) -> None:
         state.sessions.pop(session_id, None)
+
+    # ------------------------------------------------------------------ impostazioni
+    @app.get("/settings", tags=["impostazioni"], dependencies=secured)
+    async def settings_get() -> dict[str, Any]:
+        """Impostazioni salvate + stato del servizio in background."""
+        from . import background
+
+        return {**settings.load().to_dict(), "background": await run_blocking(background.status)}
+
+    @app.put("/settings", tags=["impostazioni"], dependencies=secured)
+    async def settings_put(req: SettingsUpdate) -> dict[str, Any]:
+        changes = {k: v for k, v in req.model_dump().items() if v is not None}
+        return settings.update(**changes).to_dict()
+
+    @app.post("/settings/folders", tags=["impostazioni"], dependencies=secured)
+    async def settings_add_folder(req: FolderRequest) -> dict[str, Any]:
+        """Aggiunge una cartella da indicizzare automaticamente in background."""
+        try:
+            return settings.add_folder(req.path).to_dict()
+        except NotADirectoryError as e:
+            raise HTTPException(404, _("La cartella {path} non esiste", path=req.path)) from e
+
+    @app.delete("/settings/folders", tags=["impostazioni"], dependencies=secured)
+    async def settings_remove_folder(path: str) -> dict[str, Any]:
+        return settings.remove_folder(path).to_dict()
+
+    @app.post("/settings/background", tags=["impostazioni"], dependencies=secured)
+    async def settings_background(req: BackgroundRequest) -> dict[str, Any]:
+        """Attiva o spegne il servizio (LaunchAgent) che indicizza quando il Mac è inattivo."""
+        from . import background
+
+        try:
+            await run_blocking(background.install if req.enabled else background.uninstall)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(500, _("❗ Non riuscito: {error}", error=e)) from e
+        settings.update(background_enabled=req.enabled)
+        return {**settings.load().to_dict(), "background": await run_blocking(background.status)}
 
     # ------------------------------------------------------------------ agenda
     @app.get("/agenda", tags=["agenda"], dependencies=secured)

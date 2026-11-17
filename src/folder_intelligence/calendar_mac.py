@@ -12,7 +12,6 @@ Automazione): se manca, la voce resta in agenda e viene spiegato come abilitarlo
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tempfile
@@ -77,7 +76,9 @@ class CalendarError(RuntimeError):
 
 
 def calendar_name() -> str:
-    return os.environ.get("FI_CALENDAR", "folderIntelligence").strip() or "folderIntelligence"
+    from . import settings
+
+    return settings.calendar_name()
 
 
 def enabled() -> bool:

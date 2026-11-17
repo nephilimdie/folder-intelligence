@@ -182,6 +182,7 @@ class ChatTUI:
         self.mouse = mouse
         self.select_mode = False   # Ctrl+T / F2: mouse al terminale per selezionare e copiare testo
         self.last_reply = ""
+        self._frozen_changes = False
         self.exit_code = 0
 
         for i, line in enumerate(header):
@@ -284,10 +285,18 @@ class ChatTUI:
                                                 filter=show_agenda),
                            prompt_area])
 
+        # pagina impostazioni: finestra sopra la conversazione (F3 o "impostazioni")
+        from .settings_page import SettingsPage
+
+        self.settings_open = False
+        self.settings_page = SettingsPage(self)
+        settings_visible = Condition(lambda: self.settings_open)
         root = FloatContainer(
             content=HSplit([DynamicContainer(body),
                             Window(FormattedTextControl(self._render_status), height=1, style="class:status")]),
-            floats=[Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=10, scroll_offset=1))],
+            floats=[Float(top=1, left=4, right=4,
+                          content=ConditionalContainer(self.settings_page.container, filter=settings_visible)),
+                    Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=10, scroll_offset=1))],
         )
 
         kb = KeyBindings()
@@ -332,6 +341,18 @@ class ChatTUI:
         @kb.add("f2")
         def _key_select(e) -> None:
             self.toggle_select_mode()
+
+        @kb.add("escape", filter=Condition(lambda: self.select_mode), eager=True)
+        def _key_select_exit(e) -> None:
+            self.toggle_select_mode()
+
+        @kb.add("f3")
+        def _key_settings(e) -> None:
+            self.close_settings() if self.settings_open else self.open_settings()
+
+        @kb.add("escape", filter=has_focus(self.settings_page.path_input), eager=True)
+        def _key_settings_cancel(e) -> None:
+            self.settings_page.cancel_adding()
 
         @kb.add("c-y")
         def _key_copy(e) -> None:
@@ -443,6 +464,11 @@ class ChatTUI:
             return 120
 
     def _invalidate(self) -> None:
+        # in modalità selezione lo schermo resta fermo: Terminale di macOS annulla la selezione
+        # a ogni ridisegno (spinner, avanzamento…); gli aggiornamenti arrivano all'uscita
+        if self.select_mode:
+            self._frozen_changes = True
+            return
         try:
             self.app.invalidate()
         except Exception:
@@ -515,12 +541,26 @@ class ChatTUI:
             out.append(("class:done", f"✓{item.id:>2} {text}\n"))
         return FormattedText(out)
 
+    def open_settings(self) -> None:
+        self.settings_open = True
+        self.settings_page.message = ""
+        self.app.layout.focus(self.settings_page.control)
+        self._invalidate()
+
+    def close_settings(self) -> None:
+        self.settings_open = False
+        self.settings_page.adding = False
+        self.app.layout.focus(self.input)
+        self._invalidate()
+
     def _status_hints(self) -> list[tuple[str, str]]:
         """Al massimo 3 scorciatoie, quelle utili in questo momento: (tasto, azione)."""
+        if self.settings_open:
+            return [("↑/↓", _("scegli")), (_("Invio"), _("cambia")), ("Esc", _("chiudi"))]
         if self.confirms:
             return [("←/→", _("scegli")), (_("Invio"), _("conferma")), ("Esc", _("annulla"))]
         if self.select_mode:
-            return [(_("trascina"), _("seleziona")), ("⌘C", _("copia")), ("Ctrl+T", _("fine selezione"))]
+            return [(_("trascina"), _("seleziona")), ("⌘C", _("copia")), ("Ctrl+T/Esc", _("fine selezione"))]
         if self.scroll:
             return [("Esc", _("torna in fondo")), (_("PagSu/PagGiù"), _("scorri")), ("Ctrl+T", _("seleziona"))]
         return [("Ctrl+T", _("seleziona testo")), ("Ctrl+Y", _("copia risposta")), (_("aiuto"), _("comandi"))]
@@ -554,9 +594,21 @@ class ChatTUI:
         if not self.mouse:
             self.write(_("Il mouse è già lasciato al terminale (--no-mouse): seleziona pure il testo."), "info")
             return
-        self.select_mode = not self.select_mode
-        self.write(_("📋 Modalità selezione attiva: trascina per selezionare, ⌘C per copiare. Ctrl+T per tornare.")
-                   if self.select_mode else _("👆 Rotellina di nuovo attiva."), "info")
+        entering = not self.select_mode
+        if entering:
+            self.write(_("📋 Modalità selezione: lo schermo resta fermo, trascina per selezionare e ⌘C per copiare. "
+                         "Ctrl+T o Esc per tornare."), "info")
+            self.select_mode = True
+        else:
+            self.select_mode = False
+            pending = getattr(self, "_frozen_changes", False)
+            self._frozen_changes = False
+            self.write(_("👆 Rotellina di nuovo attiva.") + (" " + _("Aggiornato con le novità arrivate nel frattempo.")
+                                                            if pending else ""), "info")
+        try:
+            self.app.invalidate()  # un ridisegno per applicare il cambio (mouse, barra gialla)
+        except Exception:
+            pass
 
     def copy_last_reply(self) -> None:
         import subprocess
@@ -576,7 +628,7 @@ class ChatTUI:
     async def _ticker(self) -> None:
         while True:
             await asyncio.sleep(0.4)  # abbastanza vivo, senza inondare i lettori di schermo
-            if self.jobs.active():
+            if self.jobs.active() and not self.select_mode:
                 self.tick += 1
                 self._invalidate()
 
@@ -723,6 +775,8 @@ class ChatTUI:
             self.last_reply = text  # Ctrl+Y copia risposte vere, non "Non ho capito"
         if job.confirmation:
             self._confirm_job(job)
+        if job.result_data.get("open_settings"):
+            self.open_settings()
         if job.result_data.get("command") == "exit":
             self._exit()
 

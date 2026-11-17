@@ -94,10 +94,20 @@ permission (Privacy & Security → Automation). `FI_CALENDAR=<name>` picks anoth
 reopens it, "delete reminder 2" removes it. Stored encrypted (`agenda.enc`); API: `GET/POST /agenda`,
 `PATCH/DELETE /agenda/{id}`.
 
+**Settings** (`settings`, or F3): the folders to index automatically in the background, when to do it
+(idle for 2–30 minutes, only when plugged in, only when the Mac isn't doing anything else — measured
+on the CPU load average), the summary model, Calendar events, language and MCP memory. Turning on
+"Index in the background" installs the LaunchAgent; every change is saved immediately (encrypted
+`settings.enc`). "index Documents automatically" adds a folder straight from the chat. The service
+then scans the watched folders by itself: new or changed files (also from Finder) become searchable,
+deleted ones leave the index, and the AI understanding follows. API: `GET/PUT /settings`,
+`POST/DELETE /settings/folders`, `POST /settings/background`. `FI_*` environment variables always win.
+
 To read back: **mouse wheel/trackpad**, PgUp/PgDn or ⇧↑/⇧↓; Esc or End jump to the bottom. If
 results arrive while you are reading further up, the view stays put and "● new messages" appears.
 Since the app captures the mouse for the wheel, press **Ctrl+T** (or F2) to **select text**: the
-mouse goes back to the terminal (drag, ⌘C), Ctrl+T again restores the wheel. **Ctrl+Y** copies the
+mouse goes back to the terminal (drag, ⌘C) and the screen **stays still** (macOS Terminal clears a
+selection whenever the screen is redrawn; updates arrive when you leave), Ctrl+T or Esc restores the wheel. **Ctrl+Y** copies the
 last answer to the clipboard. `--no-mouse` never captures the mouse.
 
 In the chat:

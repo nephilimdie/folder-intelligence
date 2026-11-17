@@ -36,10 +36,9 @@ BATCH = 8
 
 
 def idle_minutes_required() -> float:
-    try:
-        return float(os.environ.get("FI_IDLE_MINUTES", "5"))
-    except ValueError:
-        return 5.0
+    from . import settings
+
+    return settings.idle_minutes()
 
 
 # ------------------------------------------------------------------ condizioni
@@ -63,12 +62,17 @@ def idle_seconds() -> float:
 
 
 def can_work() -> tuple[bool, str]:
+    from . import settings
+
+    prefs = settings.load()
     if app_wants_index():
         return False, "app"
-    if not on_ac_power():
+    if prefs.require_ac_power and not on_ac_power():
         return False, "battery"
     if idle_seconds() < idle_minutes_required() * 60:
         return False, "user-active"
+    if not settings.system_is_free():
+        return False, "busy"  # il Mac sta lavorando ad altro
     return True, ""
 
 
@@ -141,6 +145,12 @@ async def run_service(once: bool = False, ai=None) -> int:
             ai = ai or create_ai()
             index = Index()  # ricaricato dal disco: contiene il lavoro della chat
             di = DocumentIntelligence(ai, index=index)
+            # 1) cartelle scelte nelle impostazioni: file nuovi o modificati (anche dal Finder)
+            #    diventano subito cercabili; i file cancellati escono dall'indice
+            new = await _refresh_watched(di)
+            if new:
+                _log(f"cartelle sorvegliate: {new} file nuovi o modificati resi cercabili")
+            # 2) comprensione con l'AI dei file in attesa
             pending = [p for p in di.pending_enrichment(limit=BATCH) if p.exists()]
             if not pending:
                 _log("niente da completare")
@@ -166,6 +176,25 @@ async def run_service(once: bool = False, ai=None) -> int:
         if once:
             return 0
         await asyncio.sleep(CHECK_SECONDS if pending else CHECK_SECONDS * 10)
+
+
+async def _refresh_watched(di) -> int:
+    from . import settings
+    from .scanner import scan_directory
+    from .threads import run_blocking
+
+    total = 0
+    for folder in settings.load().watched_folders:
+        root = Path(folder)
+        if not root.is_dir() or not can_work()[0]:
+            continue
+        scan = await run_blocking(scan_directory, root)
+        stats = await di.analyze_many([f.path for f in scan.files], deep=False)
+        di.index.remove_missing(root)
+        total += stats.analyzed
+    if total:
+        di.index.flush(force=True)
+    return total
 
 
 def _watch(cancel: threading.Event) -> None:

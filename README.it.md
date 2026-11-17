@@ -95,11 +95,22 @@ calendario, `FI_CALENDAR=off` lo disattiva. "fatto 2" segna la #2 come fatta, "r
 riapre, "elimina promemoria 2" la toglie. Salvata cifrata (`agenda.enc`); API: `GET/POST /agenda`,
 `PATCH/DELETE /agenda/{id}`.
 
+**Impostazioni** (`impostazioni`, o F3): le cartelle da indicizzare in automatico in background, quando
+farlo (inattivo da 2–30 minuti, solo con l'alimentazione collegata, solo se il Mac non sta facendo altro —
+misurato sul carico medio della CPU), il modello per i riassunti, gli eventi nel Calendario, la lingua e la
+memoria MCP. Attivando "Indicizza in background" si installa il LaunchAgent; ogni modifica si salva subito
+(`settings.enc`, cifrato). "indicizza Documents in automatico" aggiunge una cartella direttamente dalla
+chat. Il servizio poi scansiona da solo le cartelle sorvegliate: i file nuovi o modificati (anche dal
+Finder) diventano cercabili, quelli cancellati escono dall'indice, e segue la comprensione con l'AI.
+API: `GET/PUT /settings`, `POST/DELETE /settings/folders`, `POST /settings/background`. Le variabili
+d'ambiente `FI_*` hanno sempre la precedenza.
+
 Per rileggere la conversazione: **rotellina/trackpad**, PagSu/PagGiù o ⇧↑/⇧↓; Esc o Fine tornano
 in fondo. Se arrivano risultati mentre stai leggendo più in alto, la vista resta ferma e compare
 l'avviso "● nuovi messaggi". Poiché l'app cattura il mouse per la rotellina, premi
-**Ctrl+T** (o F2) per **selezionare testo**: il mouse torna al terminale (trascina, ⌘C), e Ctrl+T di
-nuovo riattiva la rotellina. **Ctrl+Y** copia negli appunti l'ultima risposta. `--no-mouse` non cattura
+**Ctrl+T** (o F2) per **selezionare testo**: il mouse torna al terminale (trascina, ⌘C) e lo schermo
+**resta fermo** (Terminale di macOS annulla la selezione a ogni ridisegno; gli aggiornamenti arrivano
+all'uscita); Ctrl+T o Esc riattivano la rotellina. **Ctrl+Y** copia negli appunti l'ultima risposta. `--no-mouse` non cattura
 mai il mouse.
 
 Nella chat:

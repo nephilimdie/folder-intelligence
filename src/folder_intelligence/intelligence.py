@@ -121,7 +121,9 @@ class DocumentIntelligence:
         _TEMP_DIRS.append(self._tmp)
         self._expansions: dict[str, list[str]] = {}
         # modello per i riassunti dell'indicizzazione (FI_INDEX_MODEL; "" = quello principale)
-        self.index_model: str | None = os.environ.get("FI_INDEX_MODEL", "qwen2.5:7b") or None
+        from . import settings
+
+        self.index_model: str | None = settings.index_model()
 
     # --------------------------------------------------------------- estrazione
     async def extract(self, path: Path, vision: bool | None = None) -> Extraction:

@@ -86,3 +86,19 @@ def test_history_suggestion_can_be_accepted(tmp_path):
         assert buf.text == "trovami i duplicati"
 
     asyncio.run(flow())
+
+
+def test_selection_mode_freezes_the_screen(tmp_path, monkeypatch):
+    """Terminale di macOS annulla la selezione a ogni ridisegno: in modalità selezione niente ridisegni."""
+    ui = make_ui(tmp_path)
+    redraws = []
+    monkeypatch.setattr(ui.app, "invalidate", lambda: redraws.append(1))
+    ui.toggle_select_mode()
+    redraws.clear()
+    for _ in range(20):  # avanzamento di un'attività, nuovi messaggi…
+        ui.jobs.touch()
+        ui.write("aggiornamento")
+    assert redraws == []
+    ui.toggle_select_mode()
+    assert redraws and not ui.select_mode
+    assert "novità arrivate nel frattempo" in "".join(t for line in list(ui.lines)[-1:] for _s, t in line)

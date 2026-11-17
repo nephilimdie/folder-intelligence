@@ -57,6 +57,14 @@ def detect() -> str:
     forced = _normalize(os.environ.get("FI_LANG"))
     if forced:
         return forced if forced in SUPPORTED else DEFAULT
+    try:  # lingua scelta nelle impostazioni ("auto" = quella di macOS)
+        from . import settings
+
+        chosen = settings.language()
+    except Exception:
+        chosen = None
+    if chosen in SUPPORTED:
+        return chosen
     for code in _macos_languages():
         code = _normalize(code)
         if code in SUPPORTED:

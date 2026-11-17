@@ -39,7 +39,9 @@ PURPOSE = "mcp-state"
 
 
 def default_mode() -> str:
-    mode = os.environ.get("FI_MCP_MODE", "sealed").lower()
+    from . import settings
+
+    mode = settings.mcp_mode().lower()
     return mode if mode in MODES else "sealed"
 
 
