@@ -49,7 +49,7 @@ class DuplicatesCommand(Command):
             lines.append(f"\n[{i}] {g.keep.name} — {format_size(g.size_bytes)} × {len(g.files)} ({_(g.keep.category)})")
             lines.append(_("    ✅ tengo:  {path}", path=self.rel(g.keep.path, scan.root)))
             for f in g.extras[:5]:
-                lines.append(_("    🗑️  copia: {path}", path=self.rel(f.path, scan.root)) + _note(g, f))
+                lines.append(_("    🚮 copia: {path}", path=self.rel(f.path, scan.root)) + _note(g, f))
             if len(g.extras) > 5:
                 lines.append(_("    … e altre {n} copie", n=len(g.extras) - 5))
         if len(scan.duplicates) > 10:
@@ -89,7 +89,7 @@ class DedupeCommand(Command):
         ctx.pending = plan
         lines = [_("Sposterò nel Cestino {n} copie ({size}), tenendo un originale per ogni gruppo:",
                    n=len(plan), size=format_size(scan.wasted_bytes))]
-        lines += [f"  🗑️  {self.rel(m.src, scan.root)}" for m in plan.moves[:15]]
+        lines += [f"  🚮 {self.rel(m.src, scan.root)}" for m in plan.moves[:15]]
         if len(plan) > 15:
             lines.append(_("  … e altri {n} file", n=len(plan) - 15))
         lines.append(_("Prima di spostare ogni copia ricontrollo che sia ancora identica all'originale."))

@@ -19,7 +19,8 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition, has_focus
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.key_binding.bindings.auto_suggest import load_auto_suggest_bindings
 from prompt_toolkit.layout import (ConditionalContainer, DynamicContainer, Float, FloatContainer, HSplit,
                                    Layout, VSplit, Window)
 from prompt_toolkit.layout.controls import FormattedTextControl
@@ -45,18 +46,22 @@ WIDE_MIN_COLUMNS = 100
 MAX_LINES = 4000
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 PHASES = {"scan": N_("🔍 file"), "hash": N_("🧬 confronto"), "hash_full": N_("🧬 verifica"),
-          "classify": N_("🤖 classifico"), "analyze": N_("🧠 lettura"),
-          "fingerprint": N_("🖼️ impronte"), "compare": N_("🔗 confronto")}
+          "classify": N_("🤖 classifico"), "analyze": N_("🔎 lettura"), "enrich": N_("🧠 comprensione"),
+          "fingerprint": N_("📷 impronte"), "compare": N_("🔗 confronto")}
 EXIT_WORDS = {"esci", "exit", "quit", "q", "basta", "chiudi", "bye", "close"}
 
 STYLE = Style.from_dict({
     "you": "bold",
     "reply": "ansicyan",
-    "info": "ansibrightblack",
+    "info": "",                      # testo secondario: colore normale del terminale (contrasto pieno)
+    "muted": "ansibrightblack",      # solo per l'accessorio: tempi, voci fatte, cornici
     "warn": "ansiyellow",
     "err": "ansired",
     "jobhead": "bold",
     "title": "bold ansicyan",
+    "heading": "bold",
+    "example": "italic ansicyan",
+    "starter": "ansicyan",
     "due": "ansicyan",
     "today": "bold ansiyellow",
     "overdue": "bold ansired",
@@ -64,11 +69,13 @@ STYLE = Style.from_dict({
     "frame.border": "ansibrightblack",
     "frame.label": "bold",
     "sel": "reverse bold ansicyan",
+    "opt": "bold",
     "question": "bold",
     "hint": "ansibrightblack",
     "bar": "ansicyan",
     "bar.empty": "ansibrightblack",
     "status": "reverse",
+    "status.key": "reverse bold",
     "select": "reverse bold ansiyellow",
 })
 
@@ -111,6 +118,56 @@ def _bar(fraction: float | None, width: int) -> list[tuple[str, str]]:
     return [("class:bar", "█" * full), ("class:bar.empty", "░" * (width - full))]
 
 
+def short_path(path, limit: int = 40) -> str:
+    """'/Users/me/Documents/Lavoro' → '~/Documents/Lavoro'; se troppo lungo '~/…/Lavoro'."""
+    from pathlib import Path
+
+    p = str(path)
+    home = str(Path.home())
+    if p == home or p.startswith(home + "/"):
+        p = "~" + p[len(home):]
+    if len(p) <= limit:
+        return p
+    last = p.rstrip("/").rsplit("/", 1)[-1]
+    head = "~/…/" if p.startswith("~") else "…/"
+    return (head + last) if len(head + last) <= limit else "…" + last[-(limit - 1):]
+
+
+def wrap_fragments(line: list[tuple[str, str]], width: int) -> list[list[tuple[str, str]]]:
+    """Va a capo per parole (mai a metà parola, salvo parole più lunghe della riga),
+    mantenendo gli stili e il rientro iniziale della riga."""
+    import re
+
+    from prompt_toolkit.utils import get_cwidth
+
+    text = "".join(t for _s, t in line)
+    if get_cwidth(text) <= width:
+        return [line]
+    indent = len(text) - len(text.lstrip(" "))
+    hang = " " * min(indent + 2, max(0, width // 3))
+    rows: list[list[tuple[str, str]]] = [[]]
+    used = 0
+    for style, frag in line:
+        for token in re.findall(r"\S+\s*|\s+", frag):
+            w = get_cwidth(token)
+            if used and used + get_cwidth(token.rstrip()) > width:
+                rows.append([("", hang)] if hang else [])
+                used = len(hang)
+                token = token.lstrip(" ") or token
+                w = get_cwidth(token)
+            while w > width - used and w > 0:  # parola più lunga della riga: si spezza
+                cut = max(1, width - used)
+                rows[-1].append((style, token[:cut]))
+                rows.append([("", hang)] if hang else [])
+                used = len(hang)
+                token = token[cut:]
+                w = get_cwidth(token)
+            if token:
+                rows[-1].append((style, token))
+                used += w
+    return rows
+
+
 class ChatTUI:
     def __init__(self, assistant: "Assistant", jobs: JobManager, header: list[str],
                  mouse: bool = True) -> None:
@@ -127,8 +184,11 @@ class ChatTUI:
         self.last_reply = ""
         self.exit_code = 0
 
-        for line in header:
-            self.write(line, "info")
+        for i, line in enumerate(header):
+            if isinstance(line, tuple):
+                self.write(line[1], line[0])
+            else:
+                self.write(line, "title" if i == 0 else "info")
         self.write("")
 
         # ------------------------------------------------------------- input
@@ -177,11 +237,13 @@ class ChatTUI:
 
         @confirm_kb.add("<any>")
         def _key5(e) -> None:
+            # la lettera iniziale sposta solo la selezione: per confermare serve Invio
+            # (chi inizia a scrivere una frase non deve mai spostare file nel Cestino per sbaglio)
             key = e.data.lower()
             for i, (_value, label) in enumerate(self.confirms[0].options):
                 if label.strip()[:1].lower() == key:
                     self.confirms[0].selected = i
-                    self._answer(self.confirms[0].options[i][0])
+                    self._invalidate()
                     return
 
         self.confirm_control = FormattedTextControl(self._render_confirm, focusable=True,
@@ -190,36 +252,37 @@ class ChatTUI:
         has_confirm = Condition(lambda: bool(self.confirms))
 
         # ------------------------------------------------------------ pannello
-        self.panel = Frame(Window(FormattedTextControl(self._render_jobs), wrap_lines=True),
-                           title=lambda: _("Attività ({n})", n=len(self.jobs.active())), width=D(preferred=PANEL_WIDTH))
-        # agenda sotto le attività: cose da fare con la data
-        self.agenda_panel = Frame(
-            Window(FormattedTextControl(self._render_agenda), wrap_lines=True,
-                   height=lambda: D(min=3, max=self._agenda_height(), preferred=self._agenda_height())),
-            title=lambda: _("📅 Agenda ({n})", n=len(agenda.pending())), width=D(preferred=PANEL_WIDTH))
+        # pannelli laterali: alti quanto il contenuto (un box vuoto non ruba lo schermo)
+        self.jobs_window = Window(FormattedTextControl(self._render_jobs), wrap_lines=True,
+                                  height=lambda: D.exact(self._content_height(self._render_jobs, 14)))
+        self.agenda_window = Window(FormattedTextControl(self._render_agenda), wrap_lines=True,
+                                    height=lambda: D.exact(self._content_height(self._render_agenda,
+                                                                                AGENDA_MAX_LINES + 3)))
+        self.panel = Frame(self.jobs_window, title=self._jobs_title)
+        self.agenda_panel = Frame(self.agenda_window, title=lambda: _("📅 Agenda ({n})", n=len(agenda.pending())))
 
-        left = HSplit([
-            self.output,
-            self.scroll_hint,
-            ConditionalContainer(HSplit([Window(height=1, char="─", style="class:info"), self.confirm_window]),
-                                 filter=has_confirm),
-            Window(height=1, char="─", style="class:info"),
-            self.input,
+        conversation = HSplit([self.output, self.scroll_hint])
+        # la riga di input sparisce mentre c'è una conferma: un solo posto dove agire
+        prompt_area = HSplit([
+            Window(height=1, char="─", style="class:muted"),
+            ConditionalContainer(self.confirm_window, filter=has_confirm),
+            ConditionalContainer(self.input, filter=~has_confirm),
         ])
 
         def body():
-            cols = self._columns()
-            if cols >= WIDE_MIN_COLUMNS:
-                return VSplit([left, HSplit([self.panel, self.agenda_panel], width=D(preferred=PANEL_WIDTH))])
-            # terminale stretto: i box vanno sotto, e solo se c'è qualcosa da mostrare
+            if self._columns() >= WIDE_MIN_COLUMNS:
+                side = HSplit([self.panel, self.agenda_panel, Window()], width=D(preferred=PANEL_WIDTH))
+                return VSplit([HSplit([conversation, prompt_area]), side])
+            # terminale stretto: i box stanno sopra l'input (che resta in fondo), solo se servono
             show = Condition(lambda: bool(self.jobs.active()))
             show_agenda = Condition(lambda: bool(agenda.pending()))
-            return HSplit([left, ConditionalContainer(
-                Frame(Window(FormattedTextControl(self._render_jobs), height=D(max=6), wrap_lines=True),
-                      title=lambda: _("Attività ({n})", n=len(self.jobs.active()))), filter=show),
-                ConditionalContainer(
-                Frame(Window(FormattedTextControl(self._render_agenda), height=D(max=5), wrap_lines=True),
-                      title=lambda: _("📅 Agenda ({n})", n=len(agenda.pending()))), filter=show_agenda)])
+            # stessi riquadri del layout largo: larghezza e altezza misurate sul contenuto reale
+            return HSplit([conversation,
+                           ConditionalContainer(Frame(self.jobs_window, title=self._jobs_title), filter=show),
+                           ConditionalContainer(Frame(self.agenda_window,
+                                                      title=lambda: _("📅 Agenda ({n})", n=len(agenda.pending()))),
+                                                filter=show_agenda),
+                           prompt_area])
 
         root = FloatContainer(
             content=HSplit([DynamicContainer(body),
@@ -254,6 +317,17 @@ class ChatTUI:
         def _key11(e) -> None:
             self.scroll_by(-1)
 
+        # suggerimento grigio dalla cronologia: Tab lo accetta (se non c'è un menu di completamenti);
+        # → / Ctrl+E / Ctrl+F arrivano da load_auto_suggest_bindings più sotto
+        suggestion = Condition(lambda: bool(self.input.buffer.suggestion)
+                               and self.input.buffer.document.is_cursor_at_the_end
+                               and self.input.buffer.complete_state is None)
+
+        @kb.add("tab", filter=has_focus(self.input) & suggestion)
+        def _key_accept(e) -> None:
+            buf = self.input.buffer
+            buf.insert_text(buf.suggestion.text)
+
         @kb.add("c-t")
         @kb.add("f2")
         def _key_select(e) -> None:
@@ -269,7 +343,9 @@ class ChatTUI:
             self.scroll_to_bottom()
 
         self.app: Application = Application(
-            layout=Layout(root, focused_element=self.input), key_bindings=kb, style=STYLE,
+            layout=Layout(root, focused_element=self.input),
+            # i tasti di accettazione del suggerimento non sono inclusi di default in un'Application
+            key_bindings=merge_key_bindings([load_auto_suggest_bindings(), kb]), style=STYLE,
             full_screen=True,
             # il mouse si "cattura" (rotellina) tranne in modalità selezione: lì lo gestisce il terminale
             mouse_support=Condition(lambda: self.mouse and not self.select_mode),
@@ -286,6 +362,20 @@ class ChatTUI:
             self.scroll = min(self.scroll + len(new), max(0, len(self.lines) - 1))
             self.unread = True
         self._invalidate()
+
+    def write_reply(self, text: str, style: str, command: str | None = None) -> None:
+        """Risposta con un minimo di gerarchia: titoli in grassetto, esempi tra virgolette in corsivo."""
+        if command != "help":
+            self.write(text, style)
+            return
+        for line in str(text).split("\n"):
+            stripped = line.strip()
+            if stripped.startswith('"') or stripped.startswith("«"):
+                self.write(line, "example")
+            elif line and not line[0].isalnum() and not line.startswith((" ", '"', "(")):
+                self.write(line, "heading")  # titoli dei gruppi ("🔍 Analisi")
+            else:
+                self.write(line, style)
 
     # ------------------------------------------------------------- scorrimento
     def scroll_by(self, lines: int) -> None:
@@ -313,17 +403,38 @@ class ChatTUI:
 
     def _render_output(self) -> FormattedText:
         # mostriamo le righe fino a (fine - scroll): la finestra segue l'ultima visibile,
-        # così ogni passo di scorrimento sposta subito la vista
+        # così ogni passo di scorrimento sposta subito la vista. Le righe vanno a capo per
+        # parole (non a metà parola), con il rientro della riga originale.
         visible = list(self.lines)[: max(1, len(self.lines) - self.scroll)]
+        width = self._win_width(self.output, self._columns() - (PANEL_WIDTH if self._columns() >= WIDE_MIN_COLUMNS else 0))
         out: list[tuple[str, str]] = []
-        for i, line in enumerate(visible):
-            if i:
-                out.append(("", "\n"))
-            out.extend(line)
+        rows = 0
+        for line in visible:
+            for wrapped in wrap_fragments(line, width):
+                if rows:
+                    out.append(("", "\n"))
+                out.extend(wrapped)
+                rows += 1
+        self._rendered_rows = max(1, rows)
         return FormattedText(out)
 
     def _cursor(self) -> Point:
-        return Point(x=0, y=max(0, len(self.lines) - 1 - self.scroll))  # ultima riga visibile
+        return Point(x=0, y=max(0, getattr(self, "_rendered_rows", 1) - 1))  # ultima riga visibile
+
+    @staticmethod
+    def _win_width(window: Window, fallback: int) -> int:
+        info = window.render_info
+        return max(10, info.window_width if info else fallback)
+
+    @staticmethod
+    def _content_height(render, maximum: int) -> int:
+        text = "".join(t for _style, t in render()).rstrip("\n")
+        return max(1, min(maximum, text.count("\n") + 1))
+
+    def _jobs_title(self) -> str:
+        waiting = sum(1 for j in self.jobs.list() if j.confirmation)
+        n = len(self.jobs.active()) + waiting
+        return _("Attività ({n})", n=n)
 
     def _columns(self) -> int:
         try:
@@ -339,77 +450,104 @@ class ChatTUI:
 
     # ================================================================ jobs
     def _render_jobs(self) -> FormattedText:
-        width = max(10, min(PANEL_WIDTH, self._columns()) - 14)
+        inner = self._win_width(self.jobs_window, PANEL_WIDTH - 4) if hasattr(self, "jobs_window") else PANEL_WIDTH - 4
+        width = max(10, inner - 10)
         active = self.jobs.active()
-        recent = [j for j in self.jobs.list() if not j.active][:4]
+        # tra i recenti solo ciò che è andato in background o aspetta una risposta:
+        # i comandi istantanei ("aiuto") hanno già la risposta nella conversazione
+        recent = [j for j in self.jobs.list() if not j.active and (j.background or j.confirmation)][:4]
         out: list[tuple[str, str]] = []
         if not active and not recent:
-            return FormattedText([("class:info", _("Nessuna attività.\n\nLe operazioni lunghe\n"
-                                                  "continuano qui mentre\nusi la chat."))])
+            return FormattedText([("class:muted", _("Nessuna attività in corso."))])
         for j in active:
             spin = SPINNER[self.tick % len(SPINNER)]
             title = j.title if len(j.title) <= width + 8 else j.title[: width + 7] + "…"
             out += [("class:jobhead", f"#{j.id} {spin} {title}\n")]
             phase = _(PHASES.get(j.phase, j.phase)) or (j.message[:width + 8] if j.message else _("avvio…"))
             count = f" {j.done}/{j.total}" if j.total else (f" {j.done}" if j.done else "")
-            out += [("", f"   {phase}{count}\n   ")] + _bar(j.fraction, width) + [("class:info", f" {_fmt_secs(j.elapsed)}\n")]
+            out += [("", f"   {phase}{count}\n   ")] + _bar(j.fraction, width) + [("class:muted", f" {_fmt_secs(j.elapsed)}\n")]
             if j.detail:
                 d = j.detail.rsplit("/", 1)[-1]
-                out += [("class:info", f"   {d[: width + 6]}\n")]
+                out += [("class:muted", f"   {d[: width + 6]}\n")]
             out += [("", "\n")]
         if recent:
-            out += [("class:info", _("Recenti") + "\n")]
+            out += [("class:heading", _("Recenti") + "\n")]
             for j in recent:
-                icon = {DONE: "✅", ERROR: "❌", CANCELLED: "⏹️ "}.get(j.status, "•")
+                icon = {DONE: "✅", ERROR: "❌", CANCELLED: "🛑 "}.get(j.status, "•")
                 if j.confirmation:
                     icon = "❓"
                 secs = _fmt_secs(j.elapsed)
                 room = width + 6 - len(f"#{j.id}") - len(secs) - 2  # titolo + tempo sulla stessa riga
                 title = j.title if len(j.title) <= room else j.title[: max(4, room - 1)] + "…"
-                out += [("", f"#{j.id} {icon} {title}"), ("class:info", f" {secs}\n")]
+                out += [("", f"#{j.id} {icon} {title}"), ("class:muted", f" {secs}\n")]
         if active:
-            out += [("class:info", "\n" + _("'ferma {id}' interrompe #{id}", id=active[-1].id))]
+            out += [("class:muted", "\n" + _("'ferma {id}' interrompe #{id}", id=active[0].id))]
         return FormattedText(out)
 
     # ================================================================ agenda
-    def _agenda_height(self) -> int:
-        n = len(agenda.pending()) + min(2, len(agenda.recently_done(2)))
-        return max(3, min(AGENDA_MAX_LINES, n + 1))
-
     def _render_agenda(self) -> FormattedText:
-        width = max(10, min(PANEL_WIDTH, self._columns()) - 4)
+        # larghezza reale del riquadro (non una costante): nessun troncamento inutile
+        width = self._win_width(self.agenda_window, PANEL_WIDTH - 4) if hasattr(self, "agenda_window") \
+            else PANEL_WIDTH - 4
         todo = agenda.pending()
         done = agenda.recently_done(2)
         if not todo and not done:
-            return FormattedText([("class:info", _("Nessun promemoria.\n'ricordami di … venerdì'"))])
+            return FormattedText([("class:muted", _("Niente in agenda.") + "\n"),
+                                  ("class:muted", _("Prova: ricordami di … domani alle 10"))])
         out: list[tuple[str, str]] = []
         style = {"overdue": "class:overdue", "today": "class:today", "soon": "class:due", "later": "class:due"}
-        for item in todo[:AGENDA_MAX_LINES]:
-            when = agenda.format_due(item.when)
+        dates = [agenda.format_due(i.when) for i in todo[:AGENDA_MAX_LINES]]
+        date_w = max((len(d) for d in dates), default=0)  # colonna della data larga quanto serve
+        for item, when in zip(todo[:AGENDA_MAX_LINES], dates):
             st = item.status()
-            mark = "⚠" if st == "overdue" else "●" if st == "today" else " "
-            head = f"{mark}#{item.id} "
-            date_col = f"{when:<10} " if when else ""  # "domani 18:30", "ven 20 nov"
-            text = item.text if len(head + date_col + item.text) <= width else \
-                item.text[: max(4, width - len(head + date_col) - 1)] + "…"
-            out += [("class:info", head), (style.get(st, ""), date_col), ("", text + "\n")]
+            # stato anche con un segno, non solo col colore: ! scaduto, ● oggi
+            mark = "!" if st == "overdue" else "●" if st == "today" else " "
+            head = f"{mark}{item.id:>2} "
+            date_col = f"{when:<{date_w}} " if date_w else ""
+            room = width - len(head) - len(date_col)
+            text = item.text if len(item.text) <= room else item.text[: max(4, room - 1)] + "…"
+            out += [(style.get(st, "class:muted") if mark != " " else "class:muted", head),
+                    (style.get(st, ""), date_col), ("", text + "\n")]
         if len(todo) > AGENDA_MAX_LINES:
-            out.append(("class:info", _("… e altri {n}", n=len(todo) - AGENDA_MAX_LINES) + "\n"))
+            out.append(("class:muted", _("… e altri {n}", n=len(todo) - AGENDA_MAX_LINES) + "\n"))
         for item in done:
-            text = item.text if len(item.text) <= width - 6 else item.text[: width - 7] + "…"
-            out.append(("class:done", f"✓#{item.id} {text}\n"))
+            text = item.text if len(item.text) <= width - 5 else item.text[: width - 6] + "…"
+            out.append(("class:done", f"✓{item.id:>2} {text}\n"))
         return FormattedText(out)
 
-    def _render_status(self) -> FormattedText:
-        n = len(self.jobs.active())
-        jobs = " " + _("⏳ {n} in corso", n=n) + " " if n else ""
+    def _status_hints(self) -> list[tuple[str, str]]:
+        """Al massimo 3 scorciatoie, quelle utili in questo momento: (tasto, azione)."""
+        if self.confirms:
+            return [("←/→", _("scegli")), (_("Invio"), _("conferma")), ("Esc", _("annulla"))]
         if self.select_mode:
-            return FormattedText([("class:select", " " + _("✂️  Modalità selezione: trascina col mouse e copia con ⌘C · "
-                                                          "Ctrl+T per tornare (rotellina) · Ctrl+Y copia l'ultima risposta")
-                                   + " ")])
-        return FormattedText([("class:status", f" 📁 {self.assistant.directory}  {jobs}"),
-                              ("class:status", "  " + _("Ctrl+T seleziona testo · Ctrl+Y copia risposta · Tab completa · "
-                                                       "↑/↓ storico · Ctrl+C ferma · Ctrl+D esce") + " ")])
+            return [(_("trascina"), _("seleziona")), ("⌘C", _("copia")), ("Ctrl+T", _("fine selezione"))]
+        if self.scroll:
+            return [("Esc", _("torna in fondo")), (_("PagSu/PagGiù"), _("scorri")), ("Ctrl+T", _("seleziona"))]
+        return [("Ctrl+T", _("seleziona testo")), ("Ctrl+Y", _("copia risposta")), (_("aiuto"), _("comandi"))]
+
+    def _render_status(self) -> FormattedText:
+        from prompt_toolkit.utils import get_cwidth
+
+        cols = self._columns()
+        n = len(self.jobs.active())
+        style = "class:select" if self.select_mode else "class:status"
+        pairs = self._status_hints()
+        while True:  # su terminali stretti si mostrano meno scorciatoie, mai tagliate a metà
+            hints: list[tuple[str, str]] = []
+            for key, action in pairs:
+                hints += [(style + " class:status.key" if not self.select_mode else style, f" {key} "),
+                          (style, f"{action} ")]
+            hint_w = sum(get_cwidth(t) for _st, t in hints)
+            if hint_w <= cols - 12 or len(pairs) == 1:
+                break
+            pairs = pairs[:-1]
+        left = (" " + (_("📋 Selezione testo") if self.select_mode else short_path(self.assistant.directory))
+                + ("  " + _("⏳ {n} in corso", n=n) if n else "") + " ")
+        room = cols - hint_w
+        if get_cwidth(left) > room:  # prima si accorcia il percorso, le scorciatoie restano
+            left = " " + short_path(self.assistant.directory, max(4, room - 3)) + " "
+        pad = max(0, cols - hint_w - get_cwidth(left))
+        return FormattedText([(style, left + " " * pad)] + hints)
 
     # ============================================================ selezione testo
     def toggle_select_mode(self) -> None:
@@ -417,8 +555,8 @@ class ChatTUI:
             self.write(_("Il mouse è già lasciato al terminale (--no-mouse): seleziona pure il testo."), "info")
             return
         self.select_mode = not self.select_mode
-        self.write(_("✂️  Modalità selezione attiva: trascina per selezionare, ⌘C per copiare. Ctrl+T per tornare.")
-                   if self.select_mode else _("🖱️  Rotellina di nuovo attiva."), "info")
+        self.write(_("📋 Modalità selezione attiva: trascina per selezionare, ⌘C per copiare. Ctrl+T per tornare.")
+                   if self.select_mode else _("👆 Rotellina di nuovo attiva."), "info")
 
     def copy_last_reply(self) -> None:
         import subprocess
@@ -437,7 +575,7 @@ class ChatTUI:
 
     async def _ticker(self) -> None:
         while True:
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.4)  # abbastanza vivo, senza inondare i lettori di schermo
             if self.jobs.active():
                 self.tick += 1
                 self._invalidate()
@@ -447,14 +585,13 @@ class ChatTUI:
         if not self.confirms:
             return FormattedText([])
         c = self.confirms[0]
-        prefix = f"#{c.job.id} · " if c.job else ""
-        out: list[tuple[str, str]] = [("class:question", f"{prefix}{c.question}\n  ")]
+        out: list[tuple[str, str]] = [("class:question", f"{c.question}\n")]
         for i, (_value, label) in enumerate(c.options):
-            out.append(("class:sel" if i == c.selected else "", f" {'❯' if i == c.selected else ' '} {label} "))
-            out.append(("", "  "))
-        out.append(("class:hint", _("←/→ scegli · Invio conferma · Esc annulla")))
+            chosen = i == c.selected
+            out.append(("class:sel" if chosen else "class:opt", f" {'❯' if chosen else ' '} {label} "))
+            out.append(("", "   "))
         if len(self.confirms) > 1:
-            out.append(("class:hint", "   " + _("(+{n} in attesa)", n=len(self.confirms) - 1)))
+            out.append(("class:muted", _("(+{n} in attesa)", n=len(self.confirms) - 1)))
         return FormattedText(out)
 
     def ask(self, question: str, options: list[tuple[Any, str]], default: int, on_answer, job: Job | None = None) -> None:
@@ -510,7 +647,7 @@ class ChatTUI:
         if m:
             self.write(_("Tu › ") + text, "you")
             job = self.jobs.cancel(m.group(1))
-            self.write(_("⏹️  Interrompo #{id}…", id=m.group(1)) if job and job.active else
+            self.write(_("🛑 Interrompo #{id}…", id=m.group(1)) if job and job.active else
                        _("Nessuna attività in corso con numero {id}.", id=m.group(1)), "warn")
             return True
         if low in ("attivita", "attività", "jobs", "job", "processi", "cosa stai facendo", "tasks", "activity",
@@ -550,6 +687,8 @@ class ChatTUI:
             child.progress, child.status, child.cancel = progress, status, threading.Event()
         else:
             child = base.fork(progress=progress, status=status)
+        # messaggi intermedi di un'attività lunga (es. "ricerca pronta") direttamente in chat
+        child.notify = lambda msg: self.write(msg, "info")
         job = self.jobs.start(title or text, "chat", child, lambda j: child.handle(text))
         holder["job"] = job
 
@@ -579,9 +718,9 @@ class ChatTUI:
             # la domanda finale la mostra il selettore
             lines = text.rstrip().splitlines()
             text = "\n".join(line for line in lines if not is_question(line)).rstrip()
-        self.write(text, style)
-        if text.strip():
-            self.last_reply = text
+        self.write_reply(text, style, job.result_data.get("command"))
+        if text.strip() and job.status == DONE and job.result_data.get("command") != "unknown":
+            self.last_reply = text  # Ctrl+Y copia risposte vere, non "Non ho capito"
         if job.confirmation:
             self._confirm_job(job)
         if job.result_data.get("command") == "exit":
@@ -594,9 +733,9 @@ class ChatTUI:
             return
         active = self.jobs.active()
         if active:
-            j = active[0]
+            j = active[0]  # la più recente
             self.jobs.cancel(j.id)
-            self.write(_("⏹️  Interrompo #{id} ({title})…", id=j.id, title=j.title), "warn")
+            self.write(_("🛑 Interrompo #{id} ({title})…", id=j.id, title=j.title), "warn")
             return
         now = time.monotonic()
         if now - self.last_ctrl_c < 1.5:

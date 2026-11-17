@@ -51,8 +51,9 @@ PHASE_LABELS = {
     "hash": N_("🧬 Confronto i contenuti"),
     "hash_full": N_("🧬 Verifica completa"),
     "classify": N_("🤖 Classifico"),
-    "analyze": N_("🧠 Leggo i contenuti"),
-    "fingerprint": N_("🖼️  Impronte delle foto"),
+    "analyze": N_("🔎 Leggo i testi"),
+    "enrich": N_("🧠 Comprendo con l'AI"),
+    "fingerprint": N_("📷 Impronte delle foto"),
     "compare": N_("🔗 Confronto"),
 }
 
@@ -205,6 +206,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-mouse", action="store_true",
                    help=_("non catturare il mouse (selezione testo nativa; si scorre con PagSu/PagGiù)"))
     p.add_argument("--serve", action="store_true", help=_("avvia le API HTTP locali per l'app Mac"))
+    p.add_argument("--install-background", action="store_true",
+                   help=_("installa il servizio che completa l'indicizzazione quando il Mac è inattivo e in carica"))
+    p.add_argument("--uninstall-background", action="store_true", help=_("rimuove il servizio in background"))
+    p.add_argument("--background-status", action="store_true", help=_("stato del servizio in background"))
+    p.add_argument("--background", action="store_true", help=argparse.SUPPRESS)  # lanciato da launchd
     p.add_argument("--host", default="127.0.0.1", help=_("host API (default 127.0.0.1)"))
     p.add_argument("--port", type=int, default=8765, help=_("porta API (default 8765)"))
     p.add_argument("--memory", default="json", choices=["json", "inmemory", "lightrag"], help=_("backend memoria"))
@@ -322,21 +328,41 @@ async def run_batch(args: argparse.Namespace, assistant: Assistant, progress: Pr
     return 0
 
 
-async def header_lines(assistant: Assistant) -> list[str]:
-    from . import crypto
+async def header_lines(assistant: Assistant) -> list:
+    """Intestazione della chat a pannelli: una riga di identità, poi solo ciò che serve.
 
-    ai_state = await ai_state_line(assistant.ai)
+    Cifratura e memoria MCP compaiono solo se qualcosa non va; al posto dei dettagli tecnici,
+    tre richieste d'esempio adatte alla cartella aperta."""
+    from . import crypto
+    from .tui import short_path
+
+    ai = assistant.ai
+    ai_ok = bool(ai) and await ai.is_available()
+    ai_label = (_("AI: {model}", model=ai.model) if ai_ok else _("AI non attiva") if not ai else _("AI non disponibile"))
+    lines: list = [f"folderIntelligence {__version__}  ·  {short_path(assistant.directory)}  ·  {ai_label}"]
+    if ai and not ai_ok:
+        lines.append(("warn", _("L'AI locale non risponde: {why}. Le funzioni base restano disponibili.",
+                                why=ai.why_unavailable("text"))))
     try:
         crypto.master_key()
-        sec = _("🔐 dati dell'app cifrati (AES-256-GCM, chiave in: {where})", where=crypto.key_location())
     except Exception as e:  # noqa: BLE001
-        sec = _("⚠️  cifratura non disponibile: {error}", error=e)
+        lines.append(("err", _("❗ Cifratura non disponibile: {error}", error=e)))
     mcp = assistant.mcp
-    mcp_state = (_("disattivata") if mcp.mode == "off" else
-                 f"{mcp.mode} ({_('raggiungibile') if await mcp.available() else _('non raggiungibile')})")
-    return [f"🤖 folderIntelligence {__version__}", _("Cartella: {dir}", dir=assistant.directory),
-            _("AI locale: {state}", state=ai_state), sec, _("Memoria MCP: {state}", state=mcp_state),
-            _("Scrivi 'aiuto' per i comandi. Le operazioni lunghe vanno in background nel box Attività.")]
+    if mcp.mode != "off" and not await mcp.available():
+        lines.append(("warn", _("Memoria MCP non raggiungibile: la comprensione dei file resta solo locale.")))
+    from . import background
+
+    done_while_away = background.take_report()
+    if done_while_away:
+        lines.append(("info", _("🌙 Mentre non usavi l'app ho compreso {n} file in background.", n=done_while_away)))
+    indexed = assistant.intelligence.index.stats(assistant.directory)["documents"]
+    starters = ([_("cerca la ricevuta dell'hotel"), _("trovami i duplicati"), _("cosa devo fare?")] if indexed
+                else [_("indicizza la cartella"), _("trovami i duplicati"), _("mostrami i 10 file più grandi")])
+    lines.append("")
+    lines.append(("info", _("Scrivi come parleresti. Per esempio:")))
+    lines += [("starter", f"  › {s}") for s in starters]
+    lines.append(("muted", _("'aiuto' elenca tutto · le operazioni lunghe continuano nel riquadro Attività")))
+    return lines
 
 
 async def run_tui(assistant: Assistant, mouse: bool = True) -> int:
@@ -357,7 +383,7 @@ async def run_chat(assistant: Assistant, progress: ProgressDisplay) -> int:
         crypto.master_key()
         sec = _("🔐 dati dell'app cifrati (AES-256-GCM, chiave in: {where})", where=crypto.key_location())
     except Exception as e:  # noqa: BLE001
-        sec = _("⚠️  cifratura non disponibile: {error}", error=e)
+        sec = _("❗ cifratura non disponibile: {error}", error=e)
     mcp = assistant.mcp
     mcp_state = (_("disattivata") if mcp.mode == "off" else
                  f"{mcp.mode} ({_('raggiungibile') if await mcp.available() else _('non raggiungibile')})")
@@ -463,7 +489,7 @@ async def execute(assistant: Assistant, progress: ProgressDisplay, text: str) ->
         with progress:
             return await task
     except (asyncio.CancelledError, KeyboardInterrupt):
-        return _("⏹️  Interrotto. Nessun file è stato modificato.")
+        return _("🛑 Interrotto. Nessun file è stato modificato.")
     finally:
         try:
             loop.remove_signal_handler(signal.SIGINT)
@@ -511,6 +537,36 @@ def main(argv: list[str] | None = None) -> int:
     shutdown(code)
 
 
+def background_command(args: argparse.Namespace) -> int:
+    from . import background
+
+    if args.background:
+        try:
+            return asyncio.run(background.run_service())
+        except KeyboardInterrupt:
+            return 0
+    if args.uninstall_background:
+        removed = background.uninstall()
+        out(_("Servizio in background rimosso.") if removed else _("Il servizio in background non era installato."))
+        return 0
+    if args.install_background:
+        try:
+            path = background.install()
+        except Exception as e:  # noqa: BLE001
+            out(_("❌ Installazione non riuscita: {error}", error=e), style="red")
+            return 1
+        out(_("✅ Servizio in background installato ({path}).", path=path))
+        out(_("Completa la comprensione dei file quando il Mac è in carica e non lo usi da {n} minuti; "
+              "si ferma da solo appena torni o apri la chat. Per rimuoverlo: --uninstall-background.",
+              n=int(background.idle_minutes_required())))
+        return 0
+    st = background.status()
+    out(_("Servizio in background: {state} · file completati finora: {n} · ultimo lavoro: {last}",
+          state=_("attivo") if st["running"] else _("installato, in attesa") if st["loaded"]
+          else _("non installato"), n=st["total_completed"], last=st["last_run"] or "—"))
+    return 0
+
+
 def _main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     # la lingua serve già per i testi di --help: la leggiamo prima di costruire il parser
@@ -520,6 +576,16 @@ def _main(argv: list[str] | None = None) -> int:
         elif a.startswith("--lang="):
             set_language(a.split("=", 1)[1])
     args = build_parser().parse_args(argv)
+
+    if args.background or args.install_background or args.uninstall_background or args.background_status:
+        return background_command(args)
+
+    # un solo processo alla volta scrive l'indice cifrato: se il servizio in background sta
+    # lavorando, gli chiediamo di salvare e aspettiamo qualche secondo
+    from .locks import IndexLock
+
+    IndexLock().acquire(blocking=True, on_wait=lambda: out(
+        _("⏳ Il servizio in background sta salvando il suo lavoro, un attimo…"), style="dim"))
 
     if args.serve:
         from .api import serve

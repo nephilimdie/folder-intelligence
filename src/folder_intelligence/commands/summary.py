@@ -37,13 +37,13 @@ def summary_text(ctx, scan) -> CommandResult:
     cats = scan.by_category()
     lines.append(_("  Categorie: ") + ", ".join(f"{_(c)} {len(fs)}" for c, fs in list(cats.items())[:6]))
     if scan.cloud_only_count:
-        lines.append(_("  ☁️  {n} file solo su iCloud (non scaricati).", n=scan.cloud_only_count))
+        lines.append(_("  ⛅ {n} file solo su iCloud (non scaricati).", n=scan.cloud_only_count))
     stats = ctx.intelligence.index.stats(scan.root)
     if stats["documents"]:
         lines.append(_("  🧠 {n} file già analizzati nel contenuto.", n=stats["documents"]))
     if scan.duplicates_checked:
         if scan.duplicates:
-            lines.append(_("  ⚠️  {groups} gruppi di duplicati: {copies} copie, {size} recuperabili.",
+            lines.append(_("  ❗ {groups} gruppi di duplicati: {copies} copie, {size} recuperabili.",
                            groups=len(scan.duplicates), copies=scan.duplicate_file_count,
                            size=format_size(scan.wasted_bytes)))
         else:

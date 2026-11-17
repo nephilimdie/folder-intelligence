@@ -35,7 +35,7 @@ class ConfirmCommand(Command):
                    else _n("{n} file organizzato", "{n} file organizzati", n))
         lines = [f"✅ {summary}."]
         if result.failed:
-            lines.append(_("⚠️  {n} non riusciti:", n=len(result.failed)))
+            lines.append(_("❗ {n} non riusciti:", n=len(result.failed)))
             lines += [f"  {Path(m.src).name}: {err}" for m, err in result.failed[:10]]
         await ctx.memory.save(plan.kind, _("{kind} su {root}: {summary}", kind=plan.kind, root=plan.root,
                                            summary=summary),

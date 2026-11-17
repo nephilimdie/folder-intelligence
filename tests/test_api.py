@@ -186,9 +186,9 @@ def test_background_job_progress_and_cancel(client, sample_dir, monkeypatch):
 
     real = DocumentIntelligence.analyze
 
-    async def slow(self, path, force=False):
+    async def slow(self, path, force=False, deep=True):
         await aio.sleep(0.3)
-        return await real(self, path, force)
+        return await real(self, path, force, deep)
 
     monkeypatch.setattr(DocumentIntelligence, "analyze", slow)
     r = _run(client, "index", sample_dir, wait=0.2)

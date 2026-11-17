@@ -27,10 +27,10 @@ class LargestCommand(Command):
         if not top:
             return _("Nessun file trovato.")
         lines = [_("I {n} file più grandi in {root}:", n=len(top), root=scan.root)]
-        lines += [f"  {format_size(f.size_bytes):>9}  {self.rel(f.path, scan.root)}" + ("  ☁️" if f.cloud_only else "")
+        lines += [f"  {format_size(f.size_bytes):>9}  {self.rel(f.path, scan.root)}" + ("  ⛅" if f.cloud_only else "")
                   for f in top]
         if any(f.cloud_only for f in top):
-            lines.append("\n" + _("☁️ = solo su iCloud (non scaricato su questo Mac)"))
+            lines.append("\n" + _("⛅ = solo su iCloud (non scaricato su questo Mac)"))
         return CommandResult("\n".join(lines), {"root": str(scan.root), "items": [
             {"path": str(f.path), "size_bytes": f.size_bytes, "modified": f.modified_iso,
              "cloud_only": f.cloud_only, "category": f.category} for f in top]})

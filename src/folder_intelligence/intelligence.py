@@ -13,6 +13,7 @@ Ricerca ibrida (reciprocal rank fusion): FTS5 + semantica + Spotlight + nome fil
 from __future__ import annotations
 
 import os
+import re
 
 import asyncio
 import atexit
@@ -43,6 +44,25 @@ SEMANTIC_MIN_LOOSE = 0.40   # domande ("chiedi"): meglio qualche fonte in più, 
 SEMANTIC_MARGIN = 0.07      # distanza massima dal risultato migliore
 
 
+# File che non sono documenti: dati interni di app, lock, frammenti con nomi-identificativo.
+# Si contano nelle scansioni (spazio, duplicati) ma non si "leggono" né si riassumono.
+NOT_CONTENT_EXT = {".abcdp", ".abcddb", ".abcdg", ".abcds", ".lockfile", ".lock", ".tmp", ".temp", ".part",
+                   ".crdownload", ".download", ".partial", ".swp", ".db-wal", ".db-shm", ".sqlite-wal",
+                   ".sqlite-shm", ".plist", ".icloud", ".localized", ".ds_store", ".ini", ".log", ".cache",
+                   ".map", ".pyc", ".o", ".class", ".dylib", ".so", ".dll"}
+_ID_NAME = re.compile(r"^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$|^[0-9a-f]{16,}$", re.I)
+
+
+def is_content(path: Path) -> bool:
+    """True se vale la pena leggerlo e capirlo (documenti, immagini, media, archivi, testo)."""
+    ext = path.suffix.lower()
+    if ext in NOT_CONTENT_EXT:
+        return False
+    if not ext and _ID_NAME.match(path.name):
+        return False  # es. "4A1865C8-3F9E-…": frammenti interni di app
+    return True
+
+
 def required_terms(n: int) -> int:
     """Quante parole della ricerca devono comparire nel testo: 1 su 1, 2 su 2-3, metà oltre."""
     return 1 if n <= 1 else 2 if n <= 3 else (n + 1) // 2
@@ -60,11 +80,11 @@ def summary_system() -> str:
         "You are an archivist. You receive the content extracted from a file (text, OCR, visual "
         "description, metadata). Answer ONLY with valid JSON:\n"
         '{"category": "<one of: ' + ", ".join(CATEGORIES) + '>", '
-        f'"title": "<short title in {language}>", '
-        f'"description": "<1-2 sentences in {language}: what it is and what it is about>", '
+        f'"title": "<short title in {language}, max 8 words>", '
+        f'"description": "<one sentence in {language}, max 25 words: what it is and what it is about>", '
         f'"doc_type": "<generic type in 1-2 words, in {language}: receipt, invoice, contract, policy, '
         'minutes, letter, cv, bank statement, photo, screenshot, presentation, code, …>", '
-        f'"tags": ["<5-10 lowercase keywords in {language}: document type, people/companies, places, topics, year>"], '
+        f'"tags": ["<3-6 lowercase keywords in {language}: people/companies, places, topics, year>"], '
         '"date": "<main date YYYY-MM-DD or null>", "amount": "<main amount with currency or null>"}'
     )
 
@@ -74,6 +94,7 @@ class AnalyzeStats:
     analyzed: int = 0
     skipped_fresh: int = 0
     skipped_cloud: int = 0
+    skipped_noncontent: int = 0
     errors: list[str] = field(default_factory=list)
     engines: dict[str, int] = field(default_factory=dict)
     seconds: float = 0.0
@@ -99,10 +120,13 @@ class DocumentIntelligence:
         self._tmp = Path(tempfile.mkdtemp(prefix="folder-intelligence-"))  # permessi 0700
         _TEMP_DIRS.append(self._tmp)
         self._expansions: dict[str, list[str]] = {}
+        # modello per i riassunti dell'indicizzazione (FI_INDEX_MODEL; "" = quello principale)
+        self.index_model: str | None = os.environ.get("FI_INDEX_MODEL", "qwen2.5:7b") or None
 
     # --------------------------------------------------------------- estrazione
-    async def extract(self, path: Path) -> Extraction:
-        ctx = ExtractContext(ai=self.ai, use_vision=self.use_vision, tmpdir=self._tmp)
+    async def extract(self, path: Path, vision: bool | None = None) -> Extraction:
+        use_vision = self.use_vision if vision is None else (vision and self.use_vision)
+        ctx = ExtractContext(ai=self.ai, use_vision=use_vision, tmpdir=self._tmp)
         last_error = ""
         for ex in self.extractors:
             if not ex.supports(path) or not await ex.available(ctx):
@@ -134,12 +158,19 @@ class DocumentIntelligence:
             "DurationSeconds", "AcquisitionModel", "Latitude", "Longitude")}
         prompt = (f"File name: {path.name}\nType: {meta.get('Kind', path.suffix)}\n"
                   f"Metadata: {useful_meta}\n\n"
-                  + (f"Visual description:\n{ex.description[:1500]}\n\n" if ex.description else "")
-                  + (f"Extracted text:\n{ex.text[:3500]}" if ex.text.strip() else ""))
-        try:
-            data = await self.ai.generate_json(prompt, system=summary_system())
-        except Exception:
-            return base
+                  + (f"Visual description:\n{ex.description[:1200]}\n\n" if ex.description else "")
+                  + (f"Extracted text:\n{ex.text[:2500]}" if ex.text.strip() else ""))
+        data = None
+        if self.index_model and self.index_model != getattr(self.ai, "model", None):
+            try:  # modello più leggero per indicizzare (il 14b resta per chat e domande)
+                data = await self.ai.generate_json(prompt, system=summary_system(), model=self.index_model)
+            except Exception:
+                self.index_model = None  # non disponibile: si usa il modello principale
+        if data is None:
+            try:
+                data = await self.ai.generate_json(prompt, system=summary_system())
+            except Exception:
+                return base
         cat = str(data.get("category", "")).lower()
         tags = data.get("tags") if isinstance(data.get("tags"), list) else []
         return {
@@ -153,28 +184,34 @@ class DocumentIntelligence:
             "source": "ai",
         }
 
-    async def analyze(self, path: Path, force: bool = False) -> dict[str, Any]:
-        """Analizza un file (o restituisce l'analisi in indice se il file non è cambiato)."""
+    async def analyze(self, path: Path, force: bool = False, deep: bool = True) -> dict[str, Any]:
+        """Analizza un file (o restituisce l'analisi in indice se il file non è cambiato).
+
+        `deep=False` è il passo veloce: testo, OCR ed embedding, niente modello visivo né riassunto
+        dell'AI (il file è subito cercabile; la comprensione arriva dopo con `enrich`)."""
         st = path.stat()
         if not force and self.index.fresh(path, st.st_size, st.st_mtime):
             return self.index.get(path)  # type: ignore[return-value]
-        return await self._finish(await self._read(path))
+        return await self._finish(await self._read(path, vision=deep), understand=deep)
 
-    async def _read(self, path: Path) -> tuple[Path, os.stat_result, dict[str, Any], Extraction]:
+    async def _read(self, path: Path, vision: bool = True) -> tuple[Path, os.stat_result, dict[str, Any], Extraction]:
         """Fase 1: metadati ed estrazione (OCR, modello visivo per immagini/scansioni/video)."""
         st = path.stat()
         if st.st_flags & 0x40000000 if hasattr(st, "st_flags") else False:
             raise CloudOnly(path)
         meta = await shell.mdls(path)
-        ex = Extraction(engine="metadata-only") if st.st_size > MAX_FILE_BYTES else await self.extract(path)
+        ex = Extraction(engine="metadata-only") if st.st_size > MAX_FILE_BYTES else await self.extract(path, vision)
         meta.update(ex.metadata)
         return path, st, meta, ex
 
-    async def _finish(self, read: tuple[Path, os.stat_result, dict[str, Any], Extraction]) -> dict[str, Any]:
+    async def _finish(self, read: tuple[Path, os.stat_result, dict[str, Any], Extraction],
+                      understand: bool = True) -> dict[str, Any]:
         """Fase 2: comprensione con il modello di testo, embedding, salvataggio nell'indice."""
         path, st, meta, ex = read
-        info = await self.understand(path, ex, meta)
+        info = await self.understand(path, ex, meta) if understand else self._quick_info(path, ex)
         meta.update({k: info[k] for k in ("date", "amount", "doc_type") if info.get(k)})
+        # da completare con la comprensione dell'AI? (solo se c'è qualcosa da capire)
+        meta["enriched"] = bool(understand) or not (ex.text.strip() or path.suffix.lower() in VISUAL_EXT)
 
         doc = {
             "path": str(path), "name": path.name, "ext": path.suffix.lower(), "size": st.st_size,
@@ -195,6 +232,29 @@ class DocumentIntelligence:
                 embedding = None
         self.index.upsert(doc, embedding)
         return self.index.get(path)  # type: ignore[return-value]
+
+    def _quick_info(self, path: Path, ex: Extraction) -> dict[str, Any]:
+        """Passo veloce: categoria dalle regole, titolo dal nome, prima riga del testo, date trovate."""
+        from .dates import query_dates
+
+        rule = self.rules.classify(path)
+        first = next((ln.strip() for ln in ex.text.splitlines() if len(ln.strip()) > 3), "")
+        specs = query_dates(path.stem + " " + ex.text[:1500])
+        day = next((s.start.isoformat() for s in specs if s.kind == "day"), None)
+        return {"category": rule["category"], "title": path.stem, "description": (ex.description or first)[:240],
+                "tags": [], "date": day, "amount": None, "source": "fast"}
+
+    def pending_enrichment(self, root: Path | None = None, limit: int | None = None) -> list[Path]:
+        """File indicizzati col passo veloce che aspettano la comprensione dell'AI (i più recenti prima)."""
+        return [Path(p) for p in self.index.needs_enrichment(root, limit)]
+
+    async def enrich(self, root: Path | None = None, limit: int | None = None,
+                     progress: Callable[..., None] | None = None, cancel: threading.Event | None = None,
+                     concurrency: int = 2) -> "AnalyzeStats":
+        """Seconda fase: riassunto dell'AI e lettura visiva per i file già cercabili."""
+        paths = [p for p in self.pending_enrichment(root, limit) if p.exists()]
+        return await self.analyze_many(paths, force=True, progress=progress, cancel=cancel,
+                                       concurrency=concurrency, deep=True, phase="enrich")
 
     async def _analyze_in_phases(self, todo: list[Path], stats: "AnalyzeStats",
                                  progress: Callable[..., None] | None, cancel: threading.Event | None,
@@ -244,17 +304,21 @@ class DocumentIntelligence:
     async def analyze_many(
         self, paths: list[Path], limit: int | None = None, force: bool = False,
         progress: Callable[..., None] | None = None, cancel: threading.Event | None = None,
-        concurrency: int = 2,
+        concurrency: int = 2, deep: bool = True, phase: str = "analyze",
     ) -> AnalyzeStats:
         stats = AnalyzeStats()
         start = time.monotonic()
         todo: list[Path] = []
+        if not deep:
+            concurrency = max(concurrency, 4)  # niente AI generativa: si può parallelizzare di più
         for p in paths:
             try:
                 st = p.lstat()
             except OSError:
                 continue
-            if getattr(st, "st_flags", 0) & 0x40000000:
+            if not is_content(p):
+                stats.skipped_noncontent += 1
+            elif getattr(st, "st_flags", 0) & 0x40000000:
                 stats.skipped_cloud += 1
             elif not force and self.index.fresh(p, st.st_size, st.st_mtime):
                 stats.skipped_fresh += 1
@@ -266,13 +330,13 @@ class DocumentIntelligence:
         sem = asyncio.Semaphore(concurrency)
         done = 0
         if progress:
-            progress("analyze", 0, len(todo))
+            progress(phase, 0, len(todo))
 
         # Poca memoria e motori diversi per testo e immagini (es. llama.cpp + Ollama): si lavora a
         # blocchi, prima tutte le letture visive del blocco (modello di testo scaricato), poi tutta
         # la comprensione (modello visivo scaricato): mai i due modelli grandi insieme in memoria.
         swap = getattr(self.ai, "swap_text_and_vision", None)
-        if self.ai and self.use_vision and todo and callable(swap) and swap() \
+        if deep and self.ai and self.use_vision and todo and callable(swap) and swap() \
                 and await self.ai.can_see():
             await self._analyze_in_phases(todo, stats, progress, cancel, concurrency)
             self.index.flush(force=True)
@@ -289,9 +353,9 @@ class DocumentIntelligence:
                 if cancel is not None and cancel.is_set():
                     return
                 if progress:
-                    progress("analyze", done, len(todo), p.name)  # file in lavorazione
+                    progress(phase, done, len(todo), p.name)  # file in lavorazione
                 try:
-                    doc = await self.analyze(p, force=True)
+                    doc = await self.analyze(p, force=True, deep=deep)
                     stats.analyzed += 1
                     eng = (doc or {}).get("engine", "?")
                     stats.engines[eng] = stats.engines.get(eng, 0) + 1
@@ -299,7 +363,7 @@ class DocumentIntelligence:
                     stats.errors.append(f"{p.name}: {e}")
             done += 1
             if progress:
-                progress("analyze", done, len(todo), p.name)
+                progress(phase, done, len(todo), p.name)
 
         await asyncio.gather(*(one(p) for p in todo))
         self.index.flush(force=True)

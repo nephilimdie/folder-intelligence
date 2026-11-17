@@ -309,6 +309,15 @@ class Index:
                 return []
         return [(r["path"], -r["score"], r["snip"] or "") for r in rows]
 
+    def needs_enrichment(self, root: Path | None = None, limit: int | None = None) -> list[str]:
+        """Percorsi indicizzati col passo veloce, in attesa della comprensione dell'AI (recenti prima)."""
+        scope, args = ("AND path LIKE ?", [f"{root}/%"]) if root else ("", [])
+        sql = (f"SELECT path FROM docs WHERE json_extract(metadata, '$.enriched') = 0 {scope} "
+               "ORDER BY mtime DESC" + (" LIMIT ?" if limit else ""))
+        with self.conn() as c:
+            rows = c.execute(sql, [*args, *([limit] if limit else [])]).fetchall()
+        return [r["path"] for r in rows]
+
     def dated(self, spec: Any, root: Path | None = None, limit: int = 200) -> list[str]:
         """Documenti che corrispondono a una data (`dates.DateSpec`): frase nel testo
         ("31 03 2024", "marzo 2024"), data rilevata dall'AI nell'intervallo, o pattern nel nome."""

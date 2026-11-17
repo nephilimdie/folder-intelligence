@@ -184,7 +184,7 @@ def test_indexing_never_keeps_text_and_vision_models_loaded_together(tmp_path, m
     ai = AIEngine(text, Vision(vision_model="v"), text)
     di = DocumentIntelligence(ai, index=Index(), use_vision=True)
 
-    async def fake_extract(path):
+    async def fake_extract(path, vision=None):
         return Extraction(description=await ai.describe_image(b"", "p"), engine="vision")
 
     monkeypatch.setattr(di, "extract", fake_extract)

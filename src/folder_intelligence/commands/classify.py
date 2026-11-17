@@ -33,7 +33,7 @@ class ClassifyCommand(Command):
         if by_src.get("ollama"):
             lines.append(_("🤖 {n} file classificati leggendone il testo con l'AI.", n=by_src["ollama"]))
         if not by_src.get("index"):
-            lines.append("\n" + _("ℹ️  Per classificare in base al contenuto (anche immagini e PDF): 'indicizza la cartella'."))
+            lines.append("\n" + _("💡 Per classificare in base al contenuto (anche immagini e PDF): 'indicizza la cartella'."))
         lines.append(_("Vuoi che li organizzi in cartelle per categoria? Scrivi 'organizza i file'."))
         return CommandResult("\n".join(lines), {"root": str(scan.root), "sources": by_src, "categories": [
             {"category": c, "files": [str(f.path) for f in fs], "bytes": sum(f.size_bytes for f in fs)}

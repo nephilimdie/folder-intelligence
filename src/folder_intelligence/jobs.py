@@ -129,7 +129,7 @@ class JobManager:
                     job.confirmation = describe_pending(pending, job.result_text)
             except asyncio.CancelledError:
                 job.status = CANCELLED
-                job.result_text = _("⏹️  Interrotto. Nessun file è stato modificato.")
+                job.result_text = _("🛑 Interrotto. Nessun file è stato modificato.")
             except Exception as e:  # noqa: BLE001 - riportato all'utente
                 job.status = ERROR
                 job.error = str(e) or e.__class__.__name__

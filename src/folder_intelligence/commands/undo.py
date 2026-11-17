@@ -42,12 +42,12 @@ class UndoCommand(Command):
         for r in result.restored:
             ctx.intelligence.index.move(r["from"], r["to"])
         ctx.invalidate()
-        msg = _("↩️  Operazione {id}: ripristinati {n} file nella posizione originale.",
+        msg = _("🔙 Operazione {id}: ripristinati {n} file nella posizione originale.",
                 id=result.operation_id, n=len(result.restored))
         for w in result.warnings[:10]:
-            msg += f"\n  ⚠️  {w}"
+            msg += f"\n  ❗ {w}"
         if result.failed:
-            msg += "\n" + _("⚠️  {n} non ripristinabili:", n=len(result.failed))
+            msg += "\n" + _("❗ {n} non ripristinabili:", n=len(result.failed))
             msg += "".join(f"\n  {Path(f['from']).name}: {f['error']}" for f in result.failed[:10])
         await ctx.memory.save("undo", msg)
         return CommandResult(msg, {"operation_id": result.operation_id, "undo_id": result.undo_id,

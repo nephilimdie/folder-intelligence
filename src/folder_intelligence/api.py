@@ -609,7 +609,9 @@ def create_app(
                 due = _date.fromisoformat(req.due[:10])
             except ValueError as e:
                 raise HTTPException(422, _("Data non valida: {value}", value=req.due)) from e
-        return agenda.add(text or req.text, due).to_dict()
+        item = agenda.add(text or req.text, due)
+        calendar = await run_blocking(agenda.calendar_add, item)
+        return {**(agenda.find(item.id) or item).to_dict(), "calendar": calendar}
 
     @app.patch("/agenda/{item_id}", tags=["agenda"], dependencies=secured)
     async def agenda_update(item_id: int, req: AgendaUpdate) -> dict[str, Any]:
@@ -618,7 +620,7 @@ def create_app(
         if agenda.find(item_id) is None:
             raise HTTPException(404, _("Voce dell'agenda non trovata"))
         if req.done is not None:
-            agenda.set_done(item_id, req.done)
+            await run_blocking(agenda.calendar_done, agenda.set_done(item_id, req.done))
         if req.text is not None or req.due is not None:
             due: Any = "keep"
             if req.due is not None:
@@ -631,8 +633,10 @@ def create_app(
 
     @app.delete("/agenda/{item_id}", tags=["agenda"], dependencies=secured, status_code=204)
     async def agenda_delete(item_id: int) -> None:
-        if agenda.remove(item_id) is None:
+        item = agenda.remove(item_id)
+        if item is None:
             raise HTTPException(404, _("Voce dell'agenda non trovata"))
+        await run_blocking(agenda.calendar_remove, item)
 
     # ------------------------------------------------------------------ memoria
     @app.get("/memory", tags=["memoria"], dependencies=secured)
@@ -700,7 +704,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, ai: AIEngine | None = None,
         ai = create_ai()
     app = create_app(ai, ai is not None, create_memory(memory), token=token, use_vision=use_vision)
     if host not in ("127.0.0.1", "localhost", "::1"):
-        print(_("⚠️  Attenzione: API esposte su {host}, raggiungibili da altri dispositivi in rete.", host=host))
+        print(_("❗ Attenzione: API esposte su {host}, raggiungibili da altri dispositivi in rete.", host=host))
     print(_("🤖 folderIntelligence API su http://{host}:{port}  (documentazione: /docs)", host=host, port=port))
     print(_("🔑 Token in {path}  →  header 'Authorization: Bearer <token>'", path=token_path()))
     uvicorn.run(app, host=host, port=port, log_level="info")

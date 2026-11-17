@@ -64,13 +64,13 @@ Tu › trovami i duplicati
 Trovati 3 gruppi di duplicati in ~/Downloads (4 copie, 12.3 MB recuperabili):
 [1] foto_vacanza.jpg — 4.1 MB × 2 (immagini)
     ✅ tengo:  foto_vacanza.jpg
-    🗑️  copia: foto_vacanza copia.jpg
+    🚮 copia: foto_vacanza copia.jpg
 Tu › cancella i duplicati
 Sposterò nel Cestino 4 copie (12.3 MB) … Confermi? (sì/no)
 Tu › sì
 ✅ 4 file spostati nel Cestino.
 Tu › annulla l'ultima operazione
-↩️  Ripristinati 4 file nella posizione originale.
+🔙 Ripristinati 4 file nella posizione originale.
 ```
 
 La chat è a **pannelli**: conversazione a sinistra, box **Attività** a destra (sotto, se il
@@ -87,7 +87,11 @@ scadute in rosso, quelle di oggi evidenziate, poi le prossime, poi quelle senza 
 compaiono in grigio. Ogni richiesta di promemoria va in agenda (restano note solo le frasi informative
 come "ricordati che …"); **senza data, la scadenza è tra 6 ore**. Date e orari capiti in italiano e
 inglese: oggi/domani/dopodomani, giorni della settimana, "tra 3 giorni", "il 20 novembre", "20/12",
-"2026-12-20", "alle 15", "alle 15:30". "fatto 2" segna la #2 come fatta, "riapri 2" la
+"2026-12-20", "alle 15", "alle 15:30". Ogni voce diventa anche un **evento nel Calendario di macOS**
+(calendario "folderIntelligence", creato al primo uso; 30 minuti con avviso 15 minuti prima, o tutto il
+giorno se non c'è l'ora; "fatto" lo segna con ✓, "elimina promemoria" lo cancella). macOS chiede il
+permesso una volta (Privacy e sicurezza → Automazione). `FI_CALENDAR=<nome>` sceglie un altro
+calendario, `FI_CALENDAR=off` lo disattiva. "fatto 2" segna la #2 come fatta, "riapri 2" la
 riapre, "elimina promemoria 2" la toglie. Salvata cifrata (`agenda.enc`); API: `GET/POST /agenda`,
 `PATCH/DELETE /agenda/{id}`.
 
@@ -100,10 +104,14 @@ mai il mouse.
 
 Nella chat:
 - **Tab** completa cartelle (`~/Doc` → `~/Documents/`, anche con spazi: `Foto\ Vacanze/`) e comandi (`trov` → `trovami i duplicati`);
-- **↑/↓** scorrono i comandi precedenti (salvati in `~/.folder_intelligence/history`, anche tra sessioni); il suggerimento grigio si accetta con →;
+- **↑/↓** scorrono i comandi precedenti (cifrati, anche tra sessioni); il suggerimento grigio dalla
+  cronologia si accetta con **→**, **Tab** o Ctrl+E;
+- `aiuto` mostra le 6 richieste più usate, `aiuto completo` tutti i comandi;
 - le conferme (indicizzare, spostare nel Cestino, organizzare) si danno con un **selettore**:
-  ←/→ per scegliere, Invio per confermare, `s`/`n` come scorciatoie, Esc per annullare.
-  Per le modifiche ai file l'opzione preselezionata è "No";
+  ←/→ (o la lettera iniziale) per scegliere, **Invio** per confermare, Esc per annullare; nel frattempo
+  la riga di input sparisce, così scrivendo non si conferma mai per sbaglio. Per le modifiche ai file
+  l'opzione preselezionata è "No";
+- la barra di stato mostra al massimo 3 scorciatoie, quelle utili in quel momento;
 - durante scansioni e classificazione compare una barra di avanzamento (🔍 ricerca file → 🧬 confronto contenuti → 🤖 classificazione).
 
 Comandi (linguaggio naturale, scrivi `aiuto` in chat):
@@ -255,8 +263,19 @@ gli estrattori locali.
 - I comandi con una cartella esplicita ("indicizza Documents") la rendono la cartella di lavoro, così il
   "cerca …" successivo cerca lì. Se la cartella corrente non è indicizzata, ricerca e domande usano le
   altre cartelle indicizzate e lo dicono.
-- `indicizza` legge **tutti** i file della cartella (in background, riprendibile; prima mostra una stima
-  del tempo); `--index-limit N` lo limita.
+- **Indicizzazione in due tempi.** `indicizza` fa prima un **passo veloce** su tutti i file (testo,
+  OCR, embedding: ~0,1 s a file, es. 711 documenti in 76 s) e annuncia subito "ricerca pronta"; poi la
+  **comprensione con l'AI** (riassunti con `qwen2.5:7b`, `FI_INDEX_MODEL`; immagini col modello visivo)
+  continua sui file già cercabili. `indicizza veloce` salta il secondo passo. `--index-limit N` limita i file.
+- I file che non sono documenti non vengono mai letti: librerie e backup di app (backup della Rubrica
+  `.abbu`, librerie Foto/Lightroom…) sono trattati come pacchetti; schede contatto, file di lock e
+  frammenti interni con nomi-identificativo sono saltati.
+- **Servizio in background** (`folder-intelligence --install-background`): un LaunchAgent che completa
+  la comprensione quando il Mac è **in carica e inattivo** da `FI_IDLE_MINUTES` minuti (default 5), con
+  priorità bassa (`taskpolicy -b`, I/O a bassa priorità). Si ferma appena usi il Mac o apri la chat (un
+  lock garantisce che un solo processo scriva l'indice cifrato; la chat chiede al servizio di salvare e
+  aspetta qualche secondo). Alla riapertura la chat dice cosa ha completato ("🌙 Mentre non usavi l'app
+  ho compreso N file"). `--background-status`, `--uninstall-background`. Nei log solo conteggi.
 - Ricerca ("cerca"): un documento compare solo se è davvero pertinente — nel testo devono esserci
   quasi tutte le parole cercate (2 su 2-3, metà oltre; articoli e forme elise come "dell'" ignorati)
   e la somiglianza di significato deve superare 0.53 (`FI_SEMANTIC_MIN`; misurato: pertinenti

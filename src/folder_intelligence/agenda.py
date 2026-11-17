@@ -35,6 +35,7 @@ class Item:
     done: bool = False
     created: str = ""
     done_at: str | None = None
+    calendar_uid: str | None = None  # evento corrispondente nel Calendario di macOS
 
     @property
     def due_date(self) -> date | None:
@@ -174,6 +175,49 @@ def update(ref: int | str, text: str | None = None, due: date | datetime | None 
                 _save(items)
                 return i
     return None
+
+
+# --------------------------------------------------------------- Calendario di macOS
+def calendar_add(item: Item) -> str:
+    """Crea l'evento nel Calendario; restituisce una riga per l'utente ("" se disattivato)."""
+    from . import calendar_mac
+
+    if not calendar_mac.enabled() or item.when is None:
+        return ""
+    try:
+        uid = calendar_mac.create_event(item.text, item.when)
+    except calendar_mac.CalendarError as e:
+        if str(e) == "permission":
+            return _("❗ Evento non creato: concedi l'accesso a Calendario in Impostazioni di Sistema → "
+                     "Privacy e sicurezza → Automazione (Terminale → Calendario).")
+        return _("❗ Evento non creato nel Calendario: {error}", error=e)
+    with _lock:
+        items = load()
+        for i in items:
+            if i.id == item.id:
+                i.calendar_uid = uid
+        _save(items)
+    return _("📆 Evento creato nel Calendario «{name}».", name=calendar_mac.calendar_name())
+
+
+def calendar_done(item: Item) -> None:
+    from . import calendar_mac
+
+    if item.calendar_uid and calendar_mac.enabled():
+        try:
+            calendar_mac.rename_event(item.calendar_uid, ("✓ " if item.done else "") + item.text)
+        except calendar_mac.CalendarError:
+            pass
+
+
+def calendar_remove(item: Item) -> None:
+    from . import calendar_mac
+
+    if item.calendar_uid and calendar_mac.enabled():
+        try:
+            calendar_mac.delete_event(item.calendar_uid)
+        except calendar_mac.CalendarError:
+            pass
 
 
 _ORDER = {"overdue": 0, "today": 1, "soon": 2, "later": 3, "undated": 4, "done": 5}

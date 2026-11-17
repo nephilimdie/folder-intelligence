@@ -64,13 +64,13 @@ You › find duplicates
 Found 3 groups of duplicates in ~/Downloads (4 copies, 12.3 MB recoverable):
 [1] holiday.jpg — 4.1 MB × 2 (images)
     ✅ keep:   holiday.jpg
-    🗑️  copy:   holiday copy.jpg
+    🚮 copy:   holiday copy.jpg
 You › delete the duplicates
 I will move 4 copies (12.3 MB) to the Trash … Confirm? (yes/no)
 You › yes
 ✅ 4 files moved to the Trash.
 You › undo the last operation
-↩️  Operation 3f2a9c: restored 4 files to their original location.
+🔙 Operation 3f2a9c: restored 4 files to their original location.
 ```
 
 The chat has **panels**: the conversation on the left, the **Activity** box on the right (below,
@@ -86,7 +86,11 @@ date — overdue in red, today highlighted, then upcoming ones, then those witho
 ones done appear greyed out. Every request to be reminded goes into the agenda (only statements like
 "remember that …" stay notes); **without a date it is due in 6 hours**. Dates and times are understood
 in English and Italian: today/tomorrow, weekdays, "in 3 days", "Nov 20", "20/12" (day/month),
-"2026-12-20", "at 3pm", "at 15:30". "done 2" marks #2 as done, "reopen 2"
+"2026-12-20", "at 3pm", "at 15:30". Each item also becomes an **event in the macOS Calendar**
+(calendar "folderIntelligence", created on first use; 30 minutes with an alert 15 minutes before,
+or all-day without a time; "done" marks it ✓, "delete reminder" removes it). macOS asks once for
+permission (Privacy & Security → Automation). `FI_CALENDAR=<name>` picks another calendar,
+`FI_CALENDAR=off` disables it. "done 2" marks #2 as done, "reopen 2"
 reopens it, "delete reminder 2" removes it. Stored encrypted (`agenda.enc`); API: `GET/POST /agenda`,
 `PATCH/DELETE /agenda/{id}`.
 
@@ -98,9 +102,13 @@ last answer to the clipboard. `--no-mouse` never captures the mouse.
 
 In the chat:
 - **Tab** completes folders (`~/Doc` → `~/Documents/`, spaces too: `Holiday\ Photos/`) and commands (`find d` → `find duplicates`);
-- **↑/↓** browse previous commands (encrypted, kept across sessions); accept the grey suggestion with →;
-- confirmations (indexing, moving to the Trash, organizing) use a **selector**: ←/→ to choose,
-  Enter to confirm, Esc to cancel. For changes to files the preselected option is "No";
+- **↑/↓** browse previous commands (encrypted, kept across sessions); accept the grey suggestion
+  from history with **→**, **Tab** or Ctrl+E;
+- `help` shows the 6 most used requests, `help all` every command;
+- confirmations (indexing, moving to the Trash, organizing) use a **selector**: ←/→ (or the
+  initial letter) to choose, **Enter** to confirm, Esc to cancel; the input line is hidden meanwhile,
+  so typing can never confirm by accident. For changes to files the preselected option is "No";
+- the status bar shows at most 3 shortcuts, the ones that matter right now;
 - long operations show a progress bar (🔍 finding files → 🧬 comparing contents → 🤖 classifying).
 
 Commands (natural language, type `help` in the chat):
@@ -252,8 +260,21 @@ Each result says *why* it was found.
 - Commands with an explicit folder ("index Documents") make it the working folder, so the next
   "search …" looks there. If the current folder isn't indexed, search and questions use the other
   indexed folders and say so.
-- `index` reads **all** files of the folder (in the background, resumable; ETA shown first);
-  `--index-limit N` limits it.
+- **Indexing in two steps.** `index` first does a **fast pass** on all files (text, OCR,
+  embeddings: ~0.1 s per file, e.g. 711 documents in 76 s) and announces "search ready" right away;
+  then the **AI understanding** (summaries with `qwen2.5:7b`, `FI_INDEX_MODEL`; images with the vision
+  model) continues on files that are already searchable. `index fast` skips the second step.
+  `--index-limit N` limits the files.
+- Files that are not documents are never read: app libraries and backups (`.abbu` Contacts backups,
+  Photos/Lightroom libraries…) are treated as packages; contact cards, lock files and internal
+  fragments with id-like names are skipped.
+- **Background service** (`folder-intelligence --install-background`): a LaunchAgent that completes
+  the AI understanding while the Mac is **charging and idle** for `FI_IDLE_MINUTES` (default 5),
+  with background priority (`taskpolicy -b`, low-priority I/O). It pauses as soon as you use the
+  Mac or open the chat (an index lock makes sure only one process writes the encrypted index; the
+  chat asks the service to save and waits a few seconds). The chat tells you what it completed
+  ("🌙 While you weren't using the app I understood N files"). `--background-status`,
+  `--uninstall-background`. Logs contain only counts.
 - Search ("search"): a document appears only if it is really relevant — the text must contain most
   of the words searched (2 of 2-3, half beyond; articles and elisions like Italian "dell'" ignored)
   and the semantic similarity must exceed 0.53 (`FI_SEMANTIC_MIN`; measured: relevant 0.55–0.71,

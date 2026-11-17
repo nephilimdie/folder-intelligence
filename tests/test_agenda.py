@@ -73,11 +73,14 @@ def test_panel_rendering(tmp_path):
     a = Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False)
     ui = ChatTUI(a, JobManager(), [], mouse=False)
     text = "".join(t for _style, t in ui._render_agenda())
-    lines = text.strip().splitlines()
-    assert lines[0].startswith("⚠#3") and "ieri" in lines[0]
-    assert lines[1].startswith("●#1") and "oggi" in lines[1]
+    lines = text.strip("\n").splitlines()
+    assert lines[0].startswith("! 3") and "ieri" in lines[0]   # stato anche col segno, non solo col colore
+    assert lines[1].startswith("● 1") and "oggi" in lines[1]
     assert lines[2].endswith("…")  # testo lungo troncato alla larghezza del pannello
-    assert lines[-1].startswith("✓#4")
+    assert lines[-1].startswith("✓ 4")
+    # la colonna delle date è allineata: il testo comincia alla stessa colonna in tutte le righe
+    starts = {ln.index(t) for ln, t in zip(lines[:3], ("scaduto", "chiamare", "rinnovare"))}
+    assert len(starts) == 1
 
 
 def test_api(tmp_path):
@@ -134,7 +137,7 @@ def test_selection_mode_releases_the_mouse(tmp_path, monkeypatch):
     ui = ChatTUI(Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False), JobManager(), [])
     assert ui.app.mouse_support() is True
     ui.toggle_select_mode()
-    assert ui.app.mouse_support() is False and "Modalità selezione" in "".join(t for _s, t in ui._render_status())
+    assert ui.app.mouse_support() is False and "Selezione testo" in "".join(t for _s, t in ui._render_status())
     ui.toggle_select_mode()
     assert ui.app.mouse_support() is True
 
@@ -143,3 +146,47 @@ def test_selection_mode_releases_the_mouse(tmp_path, monkeypatch):
     ui.last_reply = "risposta da copiare"
     ui.copy_last_reply()
     assert copied["text"] == b"risposta da copiare"
+
+
+def test_calendar_events_follow_the_agenda(tmp_path, monkeypatch):
+    """Ogni promemoria diventa un evento nel Calendario del Mac (AppleScript simulato)."""
+    import subprocess
+
+    from folder_intelligence import calendar_mac
+
+    calls = []
+
+    def fake_run(args, **kw):
+        script = open(args[1]).read()
+        calls.append((script, args[2:]))
+        out = "UID-123" if "make new event" in script else ""
+        return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
+
+    monkeypatch.setenv("FI_CALENDAR", "folderIntelligence")
+    monkeypatch.setattr(calendar_mac.sys, "platform", "darwin")
+    monkeypatch.setattr(calendar_mac.subprocess, "run", fake_run)
+    a = Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False)
+    out = asyncio.run(a.handle('ricordami di chiamare "il notaio" domani alle 10'))
+    assert "Evento creato nel Calendario «folderIntelligence»" in out
+    script, args = calls[0]
+    assert args[:2] == ["folderIntelligence", 'chiamare "il notaio"']  # testo come argomento, mai nello script
+    assert args[5:] == ["10", "0", "0"] and "trigger interval:-15" in script
+    assert agenda.find(1).calendar_uid == "UID-123"
+    asyncio.run(a.handle("fatto 1"))
+    assert calls[-1][1] == ["folderIntelligence", "UID-123", '✓ chiamare "il notaio"']
+    asyncio.run(a.handle("elimina promemoria 1"))
+    assert "delete" in calls[-1][0] and calls[-1][1] == ["folderIntelligence", "UID-123"]
+
+
+def test_calendar_permission_denied_is_explained(tmp_path, monkeypatch):
+    import subprocess
+
+    from folder_intelligence import calendar_mac
+
+    monkeypatch.setenv("FI_CALENDAR", "folderIntelligence")
+    monkeypatch.setattr(calendar_mac.sys, "platform", "darwin")
+    monkeypatch.setattr(calendar_mac.subprocess, "run", lambda args, **kw: subprocess.CompletedProcess(
+        args, 1, stdout="", stderr="execution error: Not authorized to send Apple events to Calendar. (-1743)"))
+    a = Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False)
+    out = asyncio.run(a.handle("ricordami di pagare l'affitto venerdì"))
+    assert "Aggiunto all'agenda" in out and "Privacy e sicurezza → Automazione" in out

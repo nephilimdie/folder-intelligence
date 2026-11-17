@@ -61,4 +61,10 @@ class RememberCommand(Command):
         item = agenda.add(what or note, when)
         msg = _("📅 Aggiunto all'agenda (#{id}): {text} — {when}", id=item.id, text=item.text,
                 when=agenda.format_due(item.when))
+        cal = await ctx.blocking(agenda.calendar_add, item)  # evento nel Calendario del Mac
+        if cal:
+            msg += "\n" + cal
+        if item.status() == "overdue":  # "… ieri": lo salviamo, ma lo diciamo
+            msg += "\n" + _("❗ Attenzione: la data è già passata. Per cambiarla: 'elimina promemoria {id}' e "
+                            "riscrivilo con la data giusta.", id=item.id)
         return CommandResult(msg, {"item": item.to_dict()})

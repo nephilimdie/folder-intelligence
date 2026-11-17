@@ -73,6 +73,7 @@ class Assistant:
         self.ai_limit = ai_limit
         self.index_limit = index_limit
         self.status = status or (lambda _msg: None)
+        self.notify: Callable[[str], None] | None = None  # messaggi intermedi (es. "ricerca pronta")
         self.source = source
         self.progress = progress
         self.classifier = FileClassifier(self.ai)
@@ -182,7 +183,7 @@ class Assistant:
                  _("Analizzerei i {n} file più recenti{of_total}: {eta}. Tutto resta sul Mac e l'indice è cifrato.",
                    n=len(todo), of_total=of_total, eta=eta)]
         if scan.cloud_only_count:
-            lines.append(_("☁️  {n} file solo su iCloud verranno saltati.", n=scan.cloud_only_count))
+            lines.append(_("⛅ {n} file solo su iCloud verranno saltati.", n=scan.cloud_only_count))
         lines.append("\n" + _("Vuoi che li legga ora? (sì/no)"))
         return "\n".join(lines)
 
@@ -194,7 +195,7 @@ class Assistant:
         docs = [d for d in (index.get(p) for p in index.under(root)) if d]
         res = await self.mcp.sync_folder(root, docs)
         if res["error"]:
-            return _("⚠️  Memoria MCP: {error} (i dati restano comunque nell'indice locale cifrato).",
+            return _("❗ Memoria MCP: {error} (i dati restano comunque nell'indice locale cifrato).",
                      error=res["error"])
         what = (_("inventario senza contenuti") if res["mode"] == "sealed"
                 else _("{n} voci con riassunti ripuliti dai dati personali", n=res["written"]))
@@ -204,7 +205,7 @@ class Assistant:
         unread = [e for e in scan.errors if "timeout" in e]
         notes = []
         if scan.cloud_only_count:
-            notes.append(_("☁️  {n} file solo su iCloud non controllati", n=scan.cloud_only_count))
+            notes.append(_("⛅ {n} file solo su iCloud non controllati", n=scan.cloud_only_count))
         if unread:
             notes.append(_("⏳ {n} file non leggibili (bloccati dalla sincronizzazione), saltati", n=len(unread)))
         return ("\n" + "\n".join(notes)) if notes else ""
@@ -303,7 +304,7 @@ class Assistant:
         try:
             reply = await self.dispatch(intent)
         except Cancelled:
-            reply = CommandResult(_("⏹️  Interrotto. Nessun file è stato modificato."), {"cancelled": True})
+            reply = CommandResult(_("🛑 Interrotto. Nessun file è stato modificato."), {"cancelled": True})
         except NotADirectoryError as e:
             reply = CommandResult(str(e), {"error": "not_a_directory"})
         except PermissionError as e:

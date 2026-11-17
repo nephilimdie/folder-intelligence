@@ -8,6 +8,7 @@ import pytest
 os.environ.setdefault("FI_MASTER_KEY", base64.b64encode(b"k" * 32).decode())
 os.environ["FI_MCP_MODE"] = "off"
 os.environ["FI_LOW_MEMORY"] = "0"  # risultato indipendente dalla RAM del Mac che esegue i test
+os.environ["FI_CALENDAR"] = "off"    # i test non creano eventi nel Calendario reale
 os.environ["FI_LANG"] = "it"       # i test verificano i testi italiani (quelli inglesi in test_i18n)
 
 

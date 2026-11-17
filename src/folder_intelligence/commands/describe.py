@@ -45,7 +45,7 @@ class DescribeCommand(Command):
         try:
             doc = await ctx.intelligence.analyze(target)
         except CloudOnly as e:
-            return f"☁️  {e}."
+            return f"⛅ {e}."
         meta = doc.get("metadata") or {}
         lines = [f"📄 {doc.get('title') or target.name}  ({target.name}, {format_size(doc.get('size') or 0)})",
                  _("   Categoria: {cat}   ·   letto con: {engine}", cat=_(doc.get("category") or "altro"),
@@ -53,7 +53,7 @@ class DescribeCommand(Command):
         if doc.get("description"):
             lines.append(f"\n{doc['description']}")
         if doc.get("tags"):
-            lines.append("\n🏷️  " + ", ".join(doc["tags"]))
+            lines.append("\n📌 " + ", ".join(doc["tags"]))
         facts = []
         for key, label in (("date", N_("data")), ("amount", N_("importo")), ("NumberOfPages", N_("pagine")),
                            ("pages", N_("pagine")), ("duration_s", N_("durata (s)")), ("resolution", N_("risoluzione")),
@@ -64,7 +64,7 @@ class DescribeCommand(Command):
             src = meta["WhereFroms"]
             facts.append(_("scaricato da: {src}", src=src[0] if isinstance(src, list) else src))
         if facts:
-            lines.append("ℹ️  " + " · ".join(facts))
+            lines.append("💡 " + " · ".join(facts))
         text = (doc.get("text") or "").strip()
         if text:
             excerpt = re.sub(r"\s+", " ", text)[:400]

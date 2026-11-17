@@ -45,7 +45,11 @@ BUNDLE_SUFFIXES = {".app", ".photoslibrary", ".bundle", ".framework", ".pkg", ".
                    ".musiclibrary", ".tvlibrary", ".imovielibrary", ".fcpbundle",
                    # documenti-pacchetto: per il Finder sono un file solo, spostarne l'interno li rompe
                    ".rtfd", ".pages", ".numbers", ".key", ".scriv", ".sparsebundle", ".logicx",
-                   ".band", ".xcworkspace", ".playground", ".lproj"}
+                   ".band", ".xcworkspace", ".playground", ".lproj",
+                   # librerie e backup di app (Rubrica, Foto, Lightroom…): dentro ci sono migliaia di
+                   # frammenti che non sono documenti
+                   ".abbu", ".aplibrary", ".photolibrary", ".migratedphotolibrary", ".lrdata",
+                   ".lrlibrary", ".dvdmedia", ".xcarchive", ".mailbox", ".mbox", ".noindex", ".nosync"}
 
 
 def is_cloud_only(st: os.stat_result) -> bool:

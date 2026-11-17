@@ -36,8 +36,20 @@ class CommandRegistry:
         return Intent("unknown", path=req.paths[0] if req.paths else None)
 
     GROUP_TITLES = {"analisi": N_("🔍 Analisi"), "ricerca": N_("🧠 Ricerca nei contenuti"),
-                    "organizzazione": N_("🗂️  Pulizia e organizzazione"), "memoria": N_("📝 Memoria"),
-                    "sistema": N_("⚙️  Sistema"), "altro": N_("🧩 Altro")}
+                    "organizzazione": N_("📂 Pulizia e organizzazione"), "memoria": N_("📝 Memoria"),
+                    "sistema": N_("🔧 Sistema"), "altro": N_("🧩 Altro")}
+
+    QUICK = (N_("trovami i duplicati"), N_("trova foto simili"), N_("indicizza la cartella"),
+             N_("cerca la ricevuta dell'hotel di Roma"), N_("ricordami di pagare l'affitto venerdì alle 10"),
+             N_("annulla l'ultima operazione"))
+
+    def quick_help(self) -> str:
+        """Le 6 richieste più utili, una per riga; il resto con 'aiuto completo'."""
+        lines = [_("Scrivi come parleresti, anche più richieste insieme. Le più usate:")]
+        lines += [f'  "{_(q)}"' for q in self.QUICK]
+        lines.append("")
+        lines.append(_("Tutti i comandi: 'aiuto completo'. Ctrl+T seleziona il testo, Ctrl+Y copia la risposta."))
+        return "\n".join(lines)
 
     def help_text(self) -> str:
         lines = [_("Ecco cosa posso fare (scrivi in linguaggio naturale, anche più richieste insieme:"),

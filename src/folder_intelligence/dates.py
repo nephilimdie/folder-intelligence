@@ -118,7 +118,7 @@ def strip_dates(text: str, specs: list[DateSpec]) -> str:
 
 # --------------------------------------------------------------------- scadenze
 _RELATIVE = {"oggi": 0, "today": 0, "domani": 1, "tomorrow": 1, "dopodomani": 2,
-             "day after tomorrow": 2}
+             "day after tomorrow": 2, "ieri": -1, "yesterday": -1}
 
 
 def parse_due(text: str, today: date | None = None) -> tuple[date | None, str]:
@@ -137,7 +137,7 @@ def parse_due(text: str, today: date | None = None) -> tuple[date | None, str]:
         s = re.sub(r"^\s*(entro|per|il|on|by)\s+", "", s, flags=re.I)
         return re.sub(r"\s{2,}", " ", s).strip(" ,.")
 
-    m = re.search(r"\b(day after tomorrow|dopodomani|domani|tomorrow|oggi|today)\b", t)
+    m = re.search(r"\b(day after tomorrow|dopodomani|domani|tomorrow|oggi|today|ieri|yesterday)\b", t)
     if m:
         return today + timedelta(days=_RELATIVE[m[1]]), cut(m)
     m = re.search(r"\b(?:tra|fra|in)\s+(\d{1,3})\s+(giorni|giorno|days|day|settimane|settimana|weeks|week)\b", t)

@@ -80,7 +80,7 @@ class SimilarCommand(Command):
                 parts.append(_("{n} gruppi di documenti", n=len(doc_groups)))
             lines.append(_("Ho trovato {what} simili in {root}:", what=_(" e ").join(parts), root=scan.root))
             for i, g in enumerate(res.groups[:SHOW_GROUPS], 1):
-                icon = "🖼️ " if g.kind == "foto" else "📄"
+                icon = "📷 " if g.kind == "foto" else "📄"
                 total = sum(f.size_bytes for f in g.files)
                 lines.append(f"\n[{i}] {icon} {g.reason} — " + _("{n} file", n=len(g.files)) + f", {format_size(total)}")
                 for f in g.files[:SHOW_FILES]:
@@ -110,5 +110,5 @@ class SimilarCommand(Command):
         if res.errors:
             notes.append(_("{n} file non leggibili", n=len(res.errors)))
         if notes:
-            lines.append("\nℹ️  " + " · ".join(notes))
+            lines.append("\n💡 " + " · ".join(notes))
         return CommandResult("\n".join(lines), data)

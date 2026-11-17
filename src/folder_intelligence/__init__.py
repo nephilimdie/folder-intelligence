@@ -1,3 +1,3 @@
 """folderIntelligence — trova duplicati e organizza cartelle con AI locale (Ollama)."""
 
-__version__ = "1.9.1"
+__version__ = "1.10.0"

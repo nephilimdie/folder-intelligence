@@ -111,7 +111,8 @@ def test_english_conversation(sample_dir):
         done = await a.handle("yes")
         assert "moved to the Trash" in done
         assert "restored" in await a.handle("undo the last operation")
-        assert "Here's what I can do" in await a.handle("help")
+        assert "Write the way you'd talk" in await a.handle("help")
+        assert "Here's what I can do" in await a.handle("help all")
         assert (await a.handle("what's in note.txt?")).count("Category:") == 1
 
     asyncio.run(flow())

@@ -79,7 +79,7 @@ def test_chat_index_describe_search_ask(docs):
         q = await a.handle("quanto costa l'affitto?")  # prima serve l'indice → domanda
         assert "Vuoi che li legga ora? (sì/no)" in q and "5 file" in q
         r = await a.handle("sì")  # indicizza e poi risponde alla domanda originale
-        assert "Analizzati 5 file" in r and "Fonti" in r
+        assert "5 file cercabili" in r and "Fonti" in r
         d = await a.handle("cosa contiene contratto.docx?")
         assert "locazione" in d and "office" in d
         s = await a.handle("cerca locazione")
@@ -193,6 +193,6 @@ def test_index_question_can_be_declined_and_overview(docs):
         assert a.intelligence.index.stats(docs)["documents"] == 0
         await a.handle("riassumi il contenuto della cartella")
         r = await a.handle("si")
-        assert "Analizzati 5 file" in r and "file letti su" in r and "Categorie" in r
+        assert "5 file cercabili" in r and "file letti su" in r and "Categorie" in r
 
     run(flow())

@@ -10,7 +10,7 @@ _REF = r"#?\s*(\d{1,4})"
 
 def item_line(item: agenda.Item) -> str:
     when = agenda.format_due(item.when)
-    mark = {"overdue": "⚠️ ", "today": "🔔 ", "done": "✅ "}.get(item.status(), "• ")
+    mark = {"overdue": "❗ ", "today": "🔔 ", "done": "✅ "}.get(item.status(), "• ")
     return f"  {mark}#{item.id}  " + (f"{when} — " if when else "") + item.text
 
 
@@ -70,7 +70,8 @@ class AgendaDoneCommand(Command):
         item = agenda.set_done(ref, done) if ref is not None else None
         if item is None:
             return _("Nell'agenda non c'è la voce #{ref}. Scrivi 'agenda' per vederla.", ref=ref)
-        msg = (_("✅ Fatto: {text}", text=item.text) if done else _("↩️  Riaperto: {text}", text=item.text))
+        await ctx.blocking(agenda.calendar_done, item)
+        msg = (_("✅ Fatto: {text}", text=item.text) if done else _("🔙 Riaperto: {text}", text=item.text))
         return CommandResult(msg, {"item": item.to_dict()})
 
 
@@ -97,5 +98,6 @@ class AgendaRemoveCommand(Command):
         item = agenda.remove(ref) if ref is not None else None
         if item is None:
             return _("Nell'agenda non c'è la voce #{ref}. Scrivi 'agenda' per vederla.", ref=ref)
-        return CommandResult(_("🗑️  Tolto dall'agenda: {text}", text=item.text), {"removed": item.to_dict()})
+        await ctx.blocking(agenda.calendar_remove, item)
+        return CommandResult(_("🚮 Tolto dall'agenda: {text}", text=item.text), {"removed": item.to_dict()})
 

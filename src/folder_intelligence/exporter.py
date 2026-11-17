@@ -65,7 +65,7 @@ def to_markdown(result: ScanResult) -> str:
         lines.append("")
         lines.append("- ✅ " + _("tieni: {path}", path=f"`{g.keep.path}`"))
         for f in g.extras:
-            lines.append("- 🗑️ " + _("copia: {path}", path=f"`{f.path}`"))
+            lines.append("- 🚮 " + _("copia: {path}", path=f"`{f.path}`"))
         lines.append("")
 
     if result.errors:
