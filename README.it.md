@@ -99,7 +99,7 @@ I **risultati delle ricerche** vanno in **box nella colonna di destra**, sotto A
 coprire la chat: ogni ricerca aggiunge un box e i precedenti restano (gli ultimi 5). Il box attivo è espanso
 (prima i 3 più pertinenti, poi per cartella, con l'anteprima del passaggio trovato), gli altri mostrano le
 prime righe. **F4** passa dalla chat ai box, **Tab/⇧Tab** cambiano box, **Esc** torna alla chat, **x** chiude
-un box. Dentro un box: Invio apre il file, spazio lo mostra in **Quick Look**, `f` lo mostra nel Finder, `c`
+un box. **Mouse**: click su un box o un file per selezionarlo, doppio click per aprirlo, rotellina per scorrere. In basso a destra il box **💡 Comandi utili** mostra i tasti e le frasi utili in quel momento. Dentro un box: Invio apre il file, spazio lo mostra in **Quick Look**, `f` lo mostra nel Finder, `c`
 copia il percorso, `?` fa una domanda su quel file, `e` mette i risultati nel Finder, `s` salva la ricerca,
 `/` scrive un filtro (i filtri a parole agiscono sul box selezionato). **Raffinare parlando**: "solo i pdf", "del 2024", "togli quelli in Downloads",
 "ordina per data", "mostrali tutti". **Risultati nel Finder**: "metti i risultati nel Finder" / "etichetta
@@ -109,6 +109,8 @@ anche salvata: i file nuovi che corrispondono si aggiungono col servizio in back
 ricerca come Viaggi", "ricerche salvate", "apri la ricerca Viaggi", "ricerche recenti", "togli l'etichetta
 Bollette". API: `GET /results/search` (filtri), `POST /results/finder`, `GET/POST /searches`,
 `POST /searches/{nome}/run`, `DELETE /searches/{nome}`.
+
+Il box **🌙 Indicizzazione automatica** nella colonna di destra mostra il servizio in background (spento / in pausa / al lavoro, con avanzamento), per ogni cartella sorvegliata quanti file sono già compresi dall'AI (barra, % e numero) e gli ultimi giri. A chat aperta l'indice lo tiene la chat e il servizio si mette in pausa: lo stesso lavoro lo fa allora la chat, quando non c'è nulla in corso e non scrivi da un minuto (stesse condizioni: attiva, alimentazione, Mac non impegnato), e si ferma dopo il file in corso appena scrivi.
 
 **Impostazioni** (`impostazioni`, o F3): le cartelle da indicizzare in automatico in background, quando
 farlo (le cartelle si scelgono nella finestra "Scegli cartella" di macOS, che parte dalla home; inattivo da 2–30 minuti, solo con l'alimentazione collegata, solo se il Mac non sta facendo altro —

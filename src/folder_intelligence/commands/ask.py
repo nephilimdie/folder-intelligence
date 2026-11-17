@@ -21,7 +21,7 @@ class AskCommand(Command):
 
     def match(self, req: Request):
         # "su «fattura.pdf»: quanto ho pagato?" — domanda su un file preciso (tasto ? nei Risultati)
-        m = re.match(r"^\s*(?:su|about)\s+«(.+?)»\s*:\s*(.+)$", req.text, re.I)
+        m = re.match(r"^\s*(?:su|about)\s+«(.+?)»\s*:?\s*(.*)$", req.text, re.I)
         if m:
             return {"file": m.group(1), "query": m.group(2).strip(), "path": None}
         if req.norm.endswith("?") or req.norm.startswith(QUESTION_START):
@@ -41,6 +41,9 @@ class AskCommand(Command):
 
     async def run(self, ctx, intent: Intent) -> str:
         question = str(intent.args.get("query") or "").strip()
+        if intent.args.get("file") and not question:
+            return _("Scrivi la domanda dopo i due punti, es. su «{name}»: quanto ho pagato?",
+                     name=intent.args["file"])
         target = self._target_file(ctx, intent.args.get("file"))
         if target:
             ctx.status(_("Leggo {name} …", name=Path(target).name))

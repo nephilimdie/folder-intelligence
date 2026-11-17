@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from typing import TYPE_CHECKING
 
 from prompt_toolkit.formatted_text import FormattedText
@@ -17,6 +18,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension as D
+from prompt_toolkit.mouse_events import MouseEventType
 from prompt_toolkit.widgets import Frame
 
 from .i18n import _
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
     from .results import Hit, ResultSet
     from .tui import ChatTUI
 
+DOUBLE_CLICK = 0.45  # secondi: secondo click sulla stessa riga = apri il file
 MAX_BOXES = 5
 COLLAPSED_ROWS = 3   # righe dei box non attivi
 
@@ -114,10 +117,40 @@ class ResultBox:
         def _close(e) -> None:
             self.area.close(self)
 
+        self._line_hits: list[int | None] = []   # riga disegnata → indice del file (None: intestazione)
+        self._last_click: tuple[float, int] = (0.0, -1)
         self.control = FormattedTextControl(self.render, focusable=True, key_bindings=kb, show_cursor=False)
+        self.control.mouse_handler = self.on_mouse  # click per scegliere, doppio click per aprire
         self.window = Window(self.control, wrap_lines=False, height=lambda: self._height())
         self.frame = Frame(self.window, title=self.title,
                            style="class:frame.box")
+
+    def on_mouse(self, ev):
+        """Click: seleziona il box e il file sotto il puntatore; doppio click: apre; rotellina: scorre."""
+        if ev.event_type == MouseEventType.SCROLL_UP:
+            self.move(-1)
+            return None
+        if ev.event_type == MouseEventType.SCROLL_DOWN:
+            self.move(1)
+            return None
+        if ev.event_type != MouseEventType.MOUSE_UP:
+            return NotImplemented
+        was_active = self.is_active
+        self.area.focus(self)
+        y = ev.position.y
+        idx = self._line_hits[y] if 0 <= y < len(self._line_hits) else None
+        if idx is not None:
+            now = time.monotonic()
+            last_t, last_i = self._last_click
+            self.selected = idx
+            self.message = ""
+            if was_active and last_i == idx and now - last_t < DOUBLE_CLICK:
+                self.run(["open"], _("Apro {name}…"))
+                self._last_click = (0.0, -1)
+            else:
+                self._last_click = (now, idx)
+        self.area.tui._invalidate()
+        return None
 
     # ------------------------------------------------------------------ stato
     @property
@@ -197,20 +230,22 @@ class ResultBox:
             screen = self.area.tui.app.output.get_size().rows
         except Exception:
             screen = 30
-        want = min(rows, max(2, screen - 16)) + (3 if self.has_focus else 1)  # + anteprima e tasti
+        want = min(rows, max(2, screen - 16)) + (2 if self.has_focus else 1)  # + anteprima e tasti
         return D(min=min(want, 5), preferred=want, max=want)
 
     def render(self) -> FormattedText:
         from .tui import short_path
 
         hits = self.hits()
+        self._line_hits = []
         if not hits:
             return FormattedText([("class:muted", _("Nessun file con questi filtri ('mostrali tutti')."))])
         rows = self._rows()
         if not self.is_active:
             out: list[tuple[str, str]] = []
-            for _i, r in rows[:COLLAPSED_ROWS]:
+            for idx, r in rows[:COLLAPSED_ROWS]:
                 out += r + [("", "\n")]
+                self._line_hits.append(idx)
             return FormattedText(out)
         # righe disponibili: quelle volute dal box (non quelle del disegno precedente, che poteva
         # essere ancora chiuso), con un tetto sull'altezza dello schermo
@@ -222,16 +257,16 @@ class ResultBox:
         sel_row = next((k for k, (idx, _r) in enumerate(rows) if idx == self.selected), 0)
         start = max(0, min(sel_row - avail // 2, len(rows) - avail))
         out = []
-        for _i, r in rows[start:start + avail]:
+        for idx, r in rows[start:start + avail]:
             out += r + [("", "\n")]
+            self._line_hits.append(idx)
         width = self._width()
         hit = self.current()
         if self.has_focus and hit:
             preview = (hit.snippet or hit.description or short_path(hit.path, width)).replace("\n", " ").strip()
             out.append(("class:example", preview[: width - 1] + "\n"))
-            out.append(("class:muted", _("spazio anteprima · f Finder · ? chiedi · e nel Finder · x chiudi")))
         elif not self.has_focus:
-            out.append(("class:muted", _("F4 per selezionare")))
+            out.append(("class:muted", _("F4 o click per selezionare")))
         if self.message:
             out.append(("class:warn", "\n" + self.message[: width * 2]))
         return FormattedText(out)

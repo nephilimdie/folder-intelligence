@@ -96,6 +96,49 @@ def _record(n: int) -> None:
     crypto.write_encrypted(_status_path(), json.dumps(st).encode(), PURPOSE)
 
 
+MAX_EVENTS = 6
+_last_live = 0.0
+
+
+def _save_status(st: dict) -> None:
+    try:
+        crypto.write_encrypted(_status_path(), json.dumps(st).encode(), PURPOSE)
+    except Exception:
+        pass
+
+
+def _live(phase: str, force: bool = True, **info) -> None:
+    """Stato del servizio in questo momento, letto dal box "Indicizzazione automatica" della chat.
+
+    phase: "scan" (cartelle sorvegliate), "tag" (ricerche salvate), "enrich" (comprensione AI),
+    "idle" (niente da fare), "paused" (info["reason"]: app, battery, user-active, busy).
+    Gli aggiornamenti di avanzamento si scrivono al massimo ogni 3 secondi."""
+    global _last_live
+    now = time.monotonic()
+    if not force and now - _last_live < 3:
+        return
+    _last_live = now
+    st = _load_status()
+    st["live"] = {"phase": phase, "at": datetime.now().isoformat(timespec="seconds"), **info}
+    _save_status(st)
+
+
+def _event(code: str, n: int = 0) -> None:
+    """Evento per la cronologia del box: codici, non frasi (la chat li traduce nella sua lingua)."""
+    st = _load_status()
+    events = st.setdefault("events", [])
+    events.append({"at": datetime.now().isoformat(timespec="seconds"), "code": code, "n": n})
+    del events[:-MAX_EVENTS]
+    _save_status(st)
+
+
+def snapshot() -> dict:
+    """Stato per la chat e le API, senza comandi di sistema (si può leggere a ogni ridisegno)."""
+    st = _load_status()
+    return {"installed": plist_path().exists(), "live": st.get("live") or {}, "events": st.get("events", []),
+            "total_completed": st.get("total", 0), "last_run": st.get("last_run")}
+
+
 def take_report() -> int:
     """Quanti file ha completato il servizio dall'ultima volta che l'hai aperta (e azzera)."""
     st = _load_status()
@@ -129,6 +172,7 @@ async def run_service(once: bool = False, ai=None) -> int:
                 ai.close()  # libera la memoria dei modelli mentre usi il Mac
             if why != paused_reason:
                 _log(f"pausa ({why})")
+                _live("paused", reason=why)
                 paused_reason = why
             if once:
                 return 0
@@ -150,23 +194,32 @@ async def run_service(once: bool = False, ai=None) -> int:
             new = await _refresh_watched(di)
             if new:
                 _log(f"cartelle sorvegliate: {new} file nuovi o modificati resi cercabili")
+                _event("scanned", new)
             # 2) ricerche salvate messe nel Finder: i file nuovi che corrispondono si aggiungono
             from . import results
 
+            _live("tag")
             tagged = await results.refresh_saved(di)
             if tagged:
                 _log(f"ricerche salvate: {tagged} file nuovi aggiunti nel Finder")
+                _event("tagged", tagged)
             # 3) comprensione con l'AI dei file in attesa
             pending = [p for p in di.pending_enrichment(limit=BATCH) if p.exists()]
             if not pending:
                 _log("niente da completare")
+                _live("idle")
                 index.flush(force=True)
             else:
                 cancel = threading.Event()
                 watcher = threading.Thread(target=_watch, args=(cancel,), daemon=True)
                 watcher.start()
                 try:
-                    stats = await di.analyze_many(pending, force=True, deep=True, cancel=cancel, phase="enrich")
+                    def progress(_phase, done, total, name=""):
+                        _live("enrich", force=False, done=done, total=total, file=str(name))
+
+                    _live("enrich", done=0, total=len(pending))
+                    stats = await di.analyze_many(pending, force=True, deep=True, cancel=cancel, phase="enrich",
+                                                  progress=progress)
                     done = stats.analyzed
                 except Cancelled:
                     done = len(pending) - len(di.pending_enrichment(limit=BATCH))
@@ -175,6 +228,8 @@ async def run_service(once: bool = False, ai=None) -> int:
                     index.flush(force=True)
                 if done > 0:
                     _record(done)
+                    _event("enriched", done)
+                _live("idle" if not di.pending_enrichment(limit=1) else "between")
                 _log(f"completati {done} file, {len(di.pending_enrichment())} ancora in attesa")
             del di, index
         finally:
@@ -194,6 +249,7 @@ async def _refresh_watched(di) -> int:
         root = Path(folder)
         if not root.is_dir() or not can_work()[0]:
             continue
+        _live("scan", folder=root.name)
         scan = await run_blocking(scan_directory, root)
         stats = await di.analyze_many([f.path for f in scan.files], deep=False)
         di.index.remove_missing(root)

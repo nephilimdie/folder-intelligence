@@ -98,7 +98,7 @@ reopens it, "delete reminder 2" removes it. Stored encrypted (`agenda.enc`); API
 the chat: every search adds a box and the previous ones stay (the last 5). The active box is expanded
 (the 3 most relevant first, then grouped by folder, with a preview of the matching passage), the others
 show their first lines. **F4** moves from the chat into the boxes, **Tab/⇧Tab** switch box, **Esc**
-goes back to the chat, **x** closes a box. Inside a box: Enter opens the file, space shows it in
+goes back to the chat, **x** closes a box. **Mouse**: click a box or a file to select it, double-click opens it, the wheel scrolls. A **💡 Useful commands** box in the bottom right shows the keys and phrases that make sense right now. Inside a box: Enter opens the file, space shows it in
 **Quick Look**, `f` reveals it in Finder, `c` copies the path, `?` asks about that file, `e` puts the
 results in Finder, `s` saves the search, `/` types a filter (word filters act on the selected box). **Refine by talking**: "only the pdfs", "from 2024", "exclude those in Downloads",
 "sort by date", "show all". **Put the results in Finder**: "put the results in Finder" / "tag these
@@ -107,6 +107,8 @@ results as Bills" adds a **Finder tag** (no file moved; default) or creates a **
 by the background service. "save this search as Trips", "saved searches", "open the search Trips",
 "recent searches", "remove the tag Bills". API: `GET /results/search` (filters), `POST /results/finder`,
 `GET/POST /searches`, `POST /searches/{name}/run`, `DELETE /searches/{name}`.
+
+The **🌙 Automatic indexing** box in the right column shows the background service (off / paused / working, with progress), for each watched folder how many files are already understood by the AI (bar, % and count), and the latest runs. While the chat is open it holds the index, so the service pauses: instead the chat itself does the same work when nothing is running and you have not typed for a minute (same conditions: enabled, on power, Mac not busy), and stops after the current file as soon as you type.
 
 **Settings** (`settings`, or F3): the folders to index automatically in the background, when to do it
 (folders are chosen in the native macOS "Choose folder" window, starting from home; idle for 2–30 minutes, only when plugged in, only when the Mac isn't doing anything else — measured

@@ -199,6 +199,7 @@ class ChatTUI:
             completer=completion.prompt_toolkit_completer(lambda: self.assistant.directory),
             complete_while_typing=False, auto_suggest=AutoSuggestFromHistory(),
             history=enc_history.prompt_toolkit_history(), accept_handler=self._on_accept,
+            focus_on_click=True,  # click sulla riga di input: si torna a scrivere nella chat
         )
 
         # ------------------------------------------------------- conversazione
@@ -262,6 +263,21 @@ class ChatTUI:
                                                                                 AGENDA_MAX_LINES + 3)))
         self.panel = Frame(self.jobs_window, title=self._jobs_title)
         self.agenda_panel = Frame(self.agenda_window, title=lambda: _("📅 Agenda ({n})", n=len(agenda.pending())))
+        # andamento dell'indicizzazione automatica (servizio in background, cartelle sorvegliate)
+        from .idle_indexer import IdleIndexer
+
+        # a chat aperta ma ferma, il lavoro del servizio lo fa la chat stessa (tiene lei l'indice)
+        self.idle_indexer = IdleIndexer(assistant, busy=lambda: bool(self.jobs.active() or self.confirms),
+                                        on_change=self._on_idle_change)
+        self.input.buffer.on_text_changed += lambda _b: self.idle_indexer.touch()
+        self._bg_cache: tuple[float, FormattedText] | None = None
+        self.bg_window = Window(FormattedTextControl(self._render_background), wrap_lines=False,
+                                height=lambda: D.exact(self._content_height(self._render_background, 10)))
+        self.bg_panel = Frame(self.bg_window, title=lambda: _("🌙 Indicizzazione automatica"))
+        # in basso a destra: i comandi utili adesso (cambiano con ciò che si sta facendo)
+        self.tips_window = Window(FormattedTextControl(self._render_tips), wrap_lines=True,
+                                  height=lambda: D.exact(self._content_height(self._render_tips, 12)))
+        self.tips_panel = Frame(self.tips_window, title=lambda: _("💡 Comandi utili"))
 
         conversation = HSplit([self.output, self.scroll_hint])
         # la riga di input sparisce mentre c'è una conferma: un solo posto dove agire
@@ -273,8 +289,10 @@ class ChatTUI:
 
         def body():
             if self._columns() >= WIDE_MIN_COLUMNS:
-                side = HSplit([self.panel, self.agenda_panel, DynamicContainer(self.results_area.container), Window()],
-                              width=D(preferred=PANEL_WIDTH))
+                side = HSplit([self.panel, self.agenda_panel, self.bg_panel,
+                               DynamicContainer(self.results_area.container), Window(),
+                               self.tips_panel],
+                              width=lambda: D.exact(self._side_width()))  # fissa: la chat non la stringe
                 return VSplit([HSplit([conversation, prompt_area]), side])
             # terminale stretto: i box stanno sopra l'input (che resta in fondo), solo se servono
             show = Condition(lambda: bool(self.jobs.active()))
@@ -442,7 +460,7 @@ class ChatTUI:
         # così ogni passo di scorrimento sposta subito la vista. Le righe vanno a capo per
         # parole (non a metà parola), con il rientro della riga originale.
         visible = list(self.lines)[: max(1, len(self.lines) - self.scroll)]
-        width = self._win_width(self.output, self._columns() - (PANEL_WIDTH if self._columns() >= WIDE_MIN_COLUMNS else 0))
+        width = self._win_width(self.output, self._columns() - (self._side_width() if self._columns() >= WIDE_MIN_COLUMNS else 0))
         out: list[tuple[str, str]] = []
         rows = 0
         for line in visible:
@@ -597,6 +615,131 @@ class ChatTUI:
             return [("Esc", _("torna in fondo")), (_("PagSu/PagGiù"), _("scorri")), ("Ctrl+T", _("seleziona"))]
         return [("Ctrl+T", _("seleziona testo")), ("Ctrl+Y", _("copia risposta")), (_("aiuto"), _("comandi"))]
 
+    def _on_idle_change(self) -> None:
+        self._bg_cache = None
+        self._invalidate()
+
+    def _render_background(self) -> FormattedText:
+        """Stato del servizio, avanzamento per cartella sorvegliata, ultimi eventi (ricalcolato ogni 5 s)."""
+        now = time.monotonic()
+        if self._bg_cache and now - self._bg_cache[0] < 5:
+            return self._bg_cache[1]
+        try:
+            text = FormattedText(self._background_lines())
+        except Exception:  # un problema qui non deve mai rompere lo schermo
+            text = FormattedText([("class:muted", _("Stato non disponibile."))])
+        self._bg_cache = (now, text)
+        return text
+
+    def _background_lines(self) -> list[tuple[str, str]]:
+        from datetime import datetime
+        from pathlib import Path
+
+        from . import background, settings
+
+        prefs = settings.load()
+        snap = background.snapshot()
+        width = self._win_width(self.bg_window, self._side_width() - 2) if hasattr(self, "bg_window") \
+            else self._side_width() - 2
+        out: list[tuple[str, str]] = []
+        if not prefs.watched_folders:
+            return [("class:muted", _("Nessuna cartella sorvegliata.") + "\n"),
+                    ("class:muted", _("F3 → aggiungi una cartella"))]
+        work = self.idle_indexer.state
+        if not prefs.background_enabled:
+            out.append(("class:warn", _("○ spenta: F3 per attivarla") + "\n"))
+        elif work.get("phase") == "enrich":
+            out.append(("class:today", _("● al lavoro: comprensione {done}/{total}", done=work.get("done", 0),
+                                         total=work.get("total", 0)) + "\n"))
+            if work.get("file"):
+                out.append(("class:muted", f"  {work['file']}"[:width] + "\n"))
+        elif work.get("phase") == "scan":
+            out.append(("class:today", _("● al lavoro: controllo le cartelle") + "\n"))
+        elif work.get("phase") == "done":
+            out.append(("class:today", _("✓ tutto letto e compreso") + "\n"))
+        elif work.get("phase") == "paused":
+            reason = {"battery": _("Mac a batteria"), "busy": _("Mac impegnato")}.get(work.get("reason"), "")
+            out.append(("class:muted", _("○ in pausa: {reason}", reason=reason) + "\n"))
+        elif work.get("phase") in ("waiting", "enrich-next") and self.jobs.active():
+            out.append(("class:muted", _("○ in attesa: la chat sta lavorando") + "\n"))
+        elif work.get("phase") in ("waiting", "enrich-next"):
+            secs = max(0, int(self.idle_indexer.idle_seconds - (time.monotonic() - self.idle_indexer.last_activity)))
+            out.append(("class:muted", (_("○ riparte tra {n} s se non scrivi", n=secs) if secs
+                                        else _("○ sto per ripartire…")) + "\n"))
+        index = self.assistant.intelligence.index
+        for folder in prefs.watched_folders[:4]:
+            total, understood = index.progress(Path(folder))
+            name = Path(folder).name or folder
+            if not total:
+                line = f"{name[:width - 18]:<{max(4, width - 18)}} " + _("da leggere")
+                out.append(("", line[:width] + "\n"))
+                continue
+            pct = understood * 100 // total
+            label = f"{understood}/{total}"
+            bar_w = max(4, min(10, width - len(label) - 16))
+            fill = round(bar_w * understood / total)
+            room = max(4, width - bar_w - len(label) - 8)
+            shown = name if len(name) <= room else name[: room - 1] + "…"
+            out += [("", f"{shown:<{room}} "), ("class:today" if pct == 100 else "class:due", "█" * fill),
+                    ("class:muted", "░" * (bar_w - fill)), ("class:muted", f" {pct:>3}% {label}\n")]
+        if len(prefs.watched_folders) > 4:
+            out.append(("class:muted", _("… e altre {n}", n=len(prefs.watched_folders) - 4) + "\n"))
+        labels = {"scanned": _("+{n} file resi cercabili"), "enriched": _("+{n} file compresi dall'AI"),
+                  "tagged": _("+{n} file aggiunti alle etichette")}
+        for ev in reversed(snap["events"][-2:]):
+            try:
+                at = datetime.fromisoformat(ev["at"]).strftime("%d/%m %H:%M")
+            except (KeyError, ValueError):
+                continue
+            msg = labels.get(ev.get("code"), "").format(n=ev.get("n", 0))
+            if msg:
+                out.append(("class:muted", f"{at} {msg}"[:width] + "\n"))
+        if out:
+            out[-1] = (out[-1][0], out[-1][1].rstrip("\n"))
+        return out
+
+    def _side_width(self) -> int:
+        """Larghezza fissa della colonna di destra: 42 colonne, fino a 56 sugli schermi larghi."""
+        return max(PANEL_WIDTH, min(56, self._columns() // 4))
+
+    def _tips(self) -> list[tuple[str, str]]:
+        """Comandi utili nel contesto attuale: (tasto o frase da scrivere, a cosa serve)."""
+        if self.settings_open:
+            return [("↑/↓", _("scegli una voce")), (_("Invio"), _("cambia il valore")),
+                    ("a", _("aggiungi una cartella")), ("Esc", _("chiudi le impostazioni"))]
+        if self.confirms:
+            return [("←/→", _("scegli la risposta")), (_("Invio"), _("conferma")), ("Esc", _("annulla"))]
+        if self.select_mode:
+            return [(_("trascina"), _("seleziona il testo")), ("⌘C", _("copia")), ("Ctrl+T", _("fine selezione"))]
+        if self.results_area.focused_box():
+            return [(_("Invio/2 click"), _("apri il file")), (_("spazio"), _("anteprima Quick Look")),
+                    ("f", _("mostra nel Finder")), ("c", _("copia il percorso")), ("?", _("chiedi su questo file")),
+                    ("e", _("etichetta nel Finder")), ("s", _("salva la ricerca")), ("/", _("filtra scrivendo")),
+                    ("Tab", _("box successivo")), ("x", _("chiudi il box")), ("Esc", _("torna alla chat"))]
+        if self.assistant.last_results is not None:
+            return [("F4", _("vai ai risultati (o click)")), (_("solo i pdf"), _("filtra l'ultima ricerca")),
+                    (_("ordina per data"), _("riordina")),
+                    (_("etichetta questi risultati come …"), _("etichetta nel Finder")),
+                    (_("salva questa ricerca come …"), _("ritrovala dopo")), ("F3", _("impostazioni"))]
+        return [(_("cerca …"), _("trova file per contenuto")), (_("indicizza la cartella"), _("leggi i file")),
+                (_("trova i duplicati"), _("libera spazio")), (_("ricordami di …"), _("agenda")),
+                ("F3", _("impostazioni")), (_("aiuto"), _("tutti i comandi"))]
+
+    def _render_tips(self) -> FormattedText:
+        from prompt_toolkit.utils import get_cwidth
+
+        width = self._win_width(self.tips_window, self._side_width() - 2) if hasattr(self, "tips_window") \
+            else self._side_width() - 2
+        tips = self._tips()
+        out: list[tuple[str, str]] = []
+        for i, (key, what) in enumerate(tips):
+            end = "\n" if i < len(tips) - 1 else ""
+            if get_cwidth(key) + 2 + get_cwidth(what) <= width:
+                out += [("class:heading", key), ("class:muted", f"  {what}{end}")]
+            else:  # frase lunga: la spiegazione va a capo, rientrata, invece di spezzarsi a metà parola
+                out += [("class:heading", key + "\n"), ("class:muted", f"  {what}{end}")]
+        return FormattedText(out)
+
     def _render_status(self) -> FormattedText:
         from prompt_toolkit.utils import get_cwidth
 
@@ -663,6 +806,8 @@ class ChatTUI:
             if self.jobs.active() and not self.select_mode:
                 self.tick += 1
                 self._invalidate()
+            elif self._bg_cache and time.monotonic() - self._bg_cache[0] > 5 and not self.select_mode:
+                self._invalidate()  # box dell'indicizzazione automatica: si aggiorna da solo
 
     # ============================================================== conferme
     def _render_confirm(self) -> FormattedText:
@@ -711,6 +856,7 @@ class ChatTUI:
 
     # ================================================================ comandi
     def _on_accept(self, buff) -> bool:
+        self.idle_indexer.touch()
         text = buff.text.strip()
         if not text:
             return False
@@ -802,6 +948,7 @@ class ChatTUI:
             # la domanda finale la mostra il selettore
             lines = text.rstrip().splitlines()
             text = "\n".join(line for line in lines if not is_question(line)).rstrip()
+        self._bg_cache = None  # l'indicizzazione appena fatta in chat cambia l'avanzamento
         if job.result_data.get("open_results") and job.status == DONE:
             # i file vanno nel riquadro Risultati; in chat resta una riga di riepilogo
             # il box appare a destra senza rubare il cursore: si continua a scrivere
@@ -856,8 +1003,11 @@ class ChatTUI:
 
     async def run(self) -> int:
         ticker = asyncio.ensure_future(self._ticker())
+        idle_work = asyncio.ensure_future(self.idle_indexer.run_forever())
         try:
             await self.app.run_async()
         finally:
             ticker.cancel()
+            idle_work.cancel()
+            self.idle_indexer.touch()  # ferma il file in corso
         return self.exit_code

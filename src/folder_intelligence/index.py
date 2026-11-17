@@ -277,6 +277,13 @@ class Index:
                           f"FROM docs {where}", args).fetchone()
         return {"documents": r["n"] or 0, "with_embedding": r["e"] or 0, "errors": r["err"] or 0}
 
+    def progress(self, root: Path) -> tuple[int, int]:
+        """(file indicizzati, di cui già compresi dall'AI) sotto una cartella."""
+        with self.conn() as c:
+            r = c.execute("SELECT COUNT(*) n, SUM(COALESCE(json_extract(metadata, '$.enriched'), 1) != 0) e "
+                          "FROM docs WHERE path LIKE ?", (f"{root}/%",)).fetchone()
+        return int(r["n"] or 0), int(r["e"] or 0)
+
     def fts(self, query: str, root: Path | None = None, limit: int = 50,
             min_match: int = 1) -> list[tuple[str, float, str]]:
         """Ricerca testuale. `min_match`: quante parole della richiesta devono comparire

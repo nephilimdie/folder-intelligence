@@ -102,3 +102,37 @@ def test_selection_mode_freezes_the_screen(tmp_path, monkeypatch):
     ui.toggle_select_mode()
     assert redraws and not ui.select_mode
     assert "novità arrivate nel frattempo" in "".join(t for line in list(ui.lines)[-1:] for _s, t in line)
+
+
+def test_useful_commands_box_follows_context(tmp_path):
+    """In basso a destra: comandi utili che cambiano con ciò che si sta facendo."""
+    import asyncio
+
+    from folder_intelligence.assistant import Assistant
+    from folder_intelligence.jobs import JobManager
+    from folder_intelligence.memory import create_memory
+    from folder_intelligence.tui import ChatTUI
+
+    (tmp_path / "ricevuta_hotel.txt").write_text("ricevuta hotel Roma")
+    a = Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False)
+    ui = ChatTUI(a, JobManager(), [])
+    text = lambda: "".join(t for _s, t in ui._render_tips())  # noqa: E731
+    assert "cerca …" in text() and "impostazioni" in text()
+    asyncio.run(a.handle("indicizza la cartella"))
+    asyncio.run(a.handle("cerca ricevuta hotel"))
+    assert "vai ai risultati" in text() and "solo i pdf" in text()
+    ui.settings_open = True
+    assert "aggiungi una cartella" in text()
+
+
+def test_side_column_has_fixed_width(tmp_path, monkeypatch):
+    """La colonna di destra non si stringe quando la chat ha righe lunghe."""
+    from folder_intelligence.assistant import Assistant
+    from folder_intelligence.jobs import JobManager
+    from folder_intelligence.memory import create_memory
+    from folder_intelligence.tui import ChatTUI
+
+    ui = ChatTUI(Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False), JobManager(), [])
+    for cols, want in ((120, 42), (200, 50), (300, 56)):
+        monkeypatch.setattr(ui, "_columns", lambda c=cols: c)
+        assert ui._side_width() == want

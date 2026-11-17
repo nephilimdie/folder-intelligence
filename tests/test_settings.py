@@ -158,3 +158,94 @@ def test_native_folder_picker(monkeypatch):
     assert settings_page.choose_folder("Scegli") is None  # annullata: niente da fare
     monkeypatch.setattr(subprocess, "run", lambda a, **k: subprocess.CompletedProcess(a, 1, stdout="", stderr="boom"))
     assert settings_page.choose_folder("Scegli") is settings_page._UNAVAILABLE  # ripiego: campo di testo
+
+
+def test_background_box_shows_progress_and_events(tmp_path, monkeypatch):
+    """Box "Indicizzazione automatica": stato del servizio, avanzamento per cartella, ultimi eventi."""
+    from folder_intelligence.tui import ChatTUI
+
+    ui = ChatTUI(Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False), JobManager(), [])
+    text = lambda: (setattr(ui, "_bg_cache", None), "".join(t for _s, t in ui._render_background()))[1]  # noqa: E731
+    assert "Nessuna cartella sorvegliata" in text()
+    folder = tmp_path / "Archivio"
+    folder.mkdir()
+    for i in range(4):
+        (folder / f"lettera{i}.txt").write_text(f"lettera numero {i}")
+    settings.add_folder(folder)
+    assert "spenta" in text() and "da leggere" in text()
+    asyncio.run(ui.assistant.handle(f"indicizza {folder}"))  # passo veloce: cercabili, non ancora compresi
+    total, understood = ui.assistant.intelligence.index.progress(folder.resolve())
+    assert total == 4
+    assert f"{understood}/4" in text()
+    settings.update(background_enabled=True)
+    assert "riparte tra" in text()  # chat appena usata: aspetta che resti ferma
+    ui.idle_indexer.state = {"phase": "enrich", "done": 3, "total": 8, "file": "a.pdf"}
+    background._event("enriched", 3)
+    shown = text()
+    assert "al lavoro: comprensione 3/8" in shown and "a.pdf" in shown and "+3 file compresi dall'AI" in shown
+
+
+def test_open_but_idle_chat_indexes_watched_folders(tmp_path, monkeypatch):
+    """Chat aperta ma ferma: legge e comprende le cartelle sorvegliate; si ferma appena scrivi."""
+    from folder_intelligence.idle_indexer import IdleIndexer
+    from folder_intelligence.intelligence import DocumentIntelligence
+
+    folder = tmp_path / "Archivio"
+    folder.mkdir()
+    for i in range(3):
+        (folder / f"lettera{i}.txt").write_text(f"lettera di dimissioni numero {i}")
+    settings.add_folder(folder)
+    ai = FakeAI()
+    a = Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False,
+                  intelligence=DocumentIntelligence(ai, index=Index()))
+    busy = {"v": False}
+    worker = IdleIndexer(a, busy=lambda: busy["v"], idle_seconds=0)
+    monkeypatch.setattr(settings, "system_is_free", lambda *a: True)
+    monkeypatch.setattr(background, "on_ac_power", lambda: True)
+    assert asyncio.run(worker.step()) == 0 and worker.state["reason"] == "off"  # spenta nelle impostazioni
+    settings.update(background_enabled=True)
+    busy["v"] = True
+    assert asyncio.run(worker.step()) == 0 and worker.state["reason"] == "chat-active"
+    busy["v"] = False
+    assert asyncio.run(worker.step()) == 3  # letti col passo veloce e compresi dall'AI
+    doc = a.intelligence.index.get(folder.resolve() / "lettera0.txt")
+    assert doc["title"] == "capito" and a.intelligence.index.progress(folder.resolve()) == (3, 3)
+    assert asyncio.run(worker.step()) == 0 and worker.state["phase"] == "done"
+    worker.idle_seconds = 60
+    (folder / "nuova.txt").write_text("lettera nuova")
+    worker._last_scan = 0
+    worker.touch()  # hai scritto: niente lavoro finché la chat non resta ferma
+    assert asyncio.run(worker.step()) == 0 and a.intelligence.index.get(folder.resolve() / "nuova.txt") is None
+    worker.idle_seconds = 0
+    assert asyncio.run(worker.step()) == 1  # ferma di nuovo: il file nuovo viene letto e compreso
+
+
+def test_idle_work_stops_when_you_type(tmp_path, monkeypatch):
+    from folder_intelligence.idle_indexer import IdleIndexer
+    from folder_intelligence.intelligence import DocumentIntelligence
+
+    class SlowAI(FakeAI):
+        async def generate_json(self, *a, **k):
+            await asyncio.sleep(0.3)
+            return await super().generate_json(*a, **k)
+
+    folder = tmp_path / "Archivio"
+    folder.mkdir()
+    for i in range(8):
+        (folder / f"nota{i}.txt").write_text(f"nota {i}")
+    settings.add_folder(folder)
+    settings.update(background_enabled=True)
+    monkeypatch.setattr(settings, "system_is_free", lambda *a: True)
+    monkeypatch.setattr(background, "on_ac_power", lambda: True)
+    a = Assistant(tmp_path, memory=create_memory("inmemory"), use_ai=False,
+                  intelligence=DocumentIntelligence(SlowAI(), index=Index()))
+    worker = IdleIndexer(a, busy=lambda: False, idle_seconds=0)
+
+    async def flow():
+        task = asyncio.ensure_future(worker.step())
+        await asyncio.sleep(0.5)
+        worker.touch()  # un tasto premuto nella chat
+        return await asyncio.wait_for(task, 5)
+
+    done = asyncio.run(flow())
+    assert done < 8 and len(a.intelligence.pending_enrichment()) == 8 - done

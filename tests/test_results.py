@@ -156,3 +156,62 @@ def test_result_boxes_stack_and_switch(tmp_path, monkeypatch):
     assert [b.rs.query for b in area.boxes] == ["ricevuta hotel"]
     text = "".join(t for _s, t in area.boxes[0].render())
     assert "ricevuta" in text.lower()
+
+
+def test_result_boxes_react_to_mouse_clicks(tmp_path, monkeypatch):
+    """Click su un box: lo seleziona e sceglie il file; doppio click: lo apre; rotellina: scorre."""
+    from prompt_toolkit.data_structures import Point
+    from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
+
+    from folder_intelligence.tui import ChatTUI
+
+    root = make_tree(tmp_path)
+    a = chat(root)
+    asyncio.run(a.handle("indicizza la cartella"))
+    asyncio.run(a.handle("cerca ricevuta hotel"))
+    asyncio.run(a.handle("cerca nota spese"))
+    ui = ChatTUI(a, JobManager(), [])
+    area = ui.results_area
+    area.sync()
+    first = area.boxes[0]
+
+    def click(box, y, kind=MouseEventType.MOUSE_UP):
+        box.render()  # come al disegno: righe → file
+        return box.on_mouse(MouseEvent(Point(x=3, y=y), kind, MouseButton.LEFT, frozenset()))
+
+    click(first, 1)  # box chiuso: riga 1 = secondo file
+    assert area.active is first and first.selected == 1 and a.last_results is first.rs
+    opened = []
+    monkeypatch.setattr("folder_intelligence.results_page.subprocess.run", lambda cmd, **k: opened.append(cmd))
+    first.render()
+    line = first._line_hits.index(2)  # box aperto: le intestazioni dei gruppi non sono file
+    click(first, line)
+    assert first.selected == 2 and not opened
+    click(first, line)  # doppio click
+    assert opened and opened[0][0] == "open" and opened[0][1] == first.selected_path()
+    click(first, 0, MouseEventType.SCROLL_DOWN)
+    assert first.selected == 3
+
+
+def test_empty_question_on_a_file_does_nothing(tmp_path):
+    """'su «file»:' senza domanda (tasto ? poi Invio) non deve diventare un piano dell'AI con etichette."""
+    from folder_intelligence.commands import registry
+    from folder_intelligence.router import Router
+
+    root = make_tree(tmp_path)
+    a = chat(root)
+    asyncio.run(a.handle("indicizza la cartella"))
+    asyncio.run(a.handle("cerca ricevuta hotel"))
+    out = asyncio.run(a.handle("su «ricevuta_hotel_roma.txt»:"))
+    assert "Scrivi la domanda" in out and results.saved() == []
+    class NoAI:  # l'AI non deve nemmeno essere interpellata
+        model = "x"
+
+        async def is_available(self):
+            raise AssertionError("AI interpellata")
+
+        async def generate_json(self, *a, **k):
+            raise AssertionError("AI interpellata")
+
+    plan = asyncio.run(Router(registry(), NoAI(), mode="ai").route("su «ricevuta_hotel_roma.txt»: quanto ho pagato?"))
+    assert plan.source == "shortcut" and [s.type for s in plan.steps] == ["ask"]

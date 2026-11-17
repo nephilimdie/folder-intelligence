@@ -166,7 +166,9 @@ class Router:
             return plan
 
         # 1) scorciatoie: risposte a domande in sospeso e comandi di servizio
-        if rules.type in SHORTCUTS or (pending is not None and rules.type in ("confirm", "cancel")):
+        # "su «file»: …" (tasto ? dei risultati) è sempre una domanda su quel file: niente piani dell'AI
+        pinned_question = rules.type == "ask" and bool(rules.args.get("file"))
+        if rules.type in SHORTCUTS or pinned_question or (pending is not None and rules.type in ("confirm", "cancel")):
             return done(RoutePlan([rules], "shortcut"))
         if self.mode == "rules" or not await self._ai_ready():
             return done(RoutePlan([rules], "rules"))
