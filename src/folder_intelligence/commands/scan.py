@@ -1,3 +1,4 @@
+from ..i18n import N_, _
 from ..intents import Intent
 from .base import Command, Request
 from .summary import summary_text
@@ -6,9 +7,10 @@ from .summary import summary_text
 class ScanCommand(Command):
     name = "scan"
     group = "analisi"
-    description = "Analizza una cartella (veloce: solo nomi e dimensioni)"
-    examples = ("analizza la cartella Downloads", "analizza ~/Desktop")
-    keywords = ("analizza", "scansiona", "scan", "controlla", "guarda", "esamina")
+    description = N_("Analizza una cartella (veloce: solo nomi e dimensioni)")
+    examples = (N_("analizza la cartella Downloads"), N_("analizza ~/Desktop"))
+    keywords = ("analizza", "scansiona", "scan", "controlla", "guarda", "esamina", "analyze", "analyse",
+                "check", "look at", "examine", "inspect")
     priority = 50
 
     def match(self, req: Request):
@@ -20,6 +22,6 @@ class ScanCommand(Command):
         scan = await ctx.get_scan(intent.path, refresh=True)
         if intent.path is not None:
             ctx.directory = scan.root
-        await ctx.memory.save("scan", f"Scansione di {scan.root}: {len(scan.files)} file",
+        await ctx.memory.save("scan", _("Scansione di {root}: {n} file", root=scan.root, n=len(scan.files)),
                               {"root": str(scan.root)})
         return summary_text(ctx, scan)

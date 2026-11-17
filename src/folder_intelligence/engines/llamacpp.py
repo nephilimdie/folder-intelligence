@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from ..i18n import _
+
 import asyncio
 import atexit
 import gc
@@ -60,7 +62,7 @@ def resolve_gguf(name: str) -> Path | None:
     p = Path(name).expanduser()
     if p.suffix == ".gguf" and p.is_file():
         return p
-    repo, _, tag = name.partition(":")
+    repo, _sep, tag = name.partition(":")
     tag = tag or "latest"
     if "/" not in repo:
         repo = f"library/{repo}"
@@ -194,10 +196,10 @@ class LlamaCppEngine(EngineStrategy):
 
     def why_unavailable(self, capability: str = TEXT) -> str:
         if not self.installed():
-            return "llama.cpp non installato: pip install llama-cpp-python"
+            return _("llama.cpp non installato: pip install llama-cpp-python")
         model = self.model_for(capability)
-        return (f"modello '{model}' non trovato come file GGUF (scaricalo con `ollama pull {model}` "
-                "o indica il percorso di un file .gguf)")
+        return _("modello '{model}' non trovato come file GGUF (scaricalo con `ollama pull {model}` "
+                 "o indica il percorso di un file .gguf)", model=model)
 
     def describe(self) -> dict[str, Any]:
         d = super().describe()
@@ -281,8 +283,9 @@ class LlamaCppEngine(EngineStrategy):
     @staticmethod
     def _oom_error(name: str) -> OutOfMemory:
         return OutOfMemory(
-            f"memoria GPU insufficiente per caricare {name} con llama.cpp. Chiudi altre app pesanti "
-            "o controlla i modelli tenuti in memoria da Ollama (`ollama ps`), oppure usa --engine ollama.")
+            _("memoria GPU insufficiente per caricare {name} con llama.cpp. Chiudi altre app pesanti "
+              "o controlla i modelli tenuti in memoria da Ollama (`ollama ps`), oppure usa --engine ollama.",
+              name=name))
 
     async def _run(self, name: str, embedding: bool, fn) -> Any:
         def work() -> Any:
@@ -342,7 +345,7 @@ class LlamaCppEngine(EngineStrategy):
         last = dict(messages[-1])
         tokens = llm.tokenize(last["content"].encode(), add_bos=False)
         keep = max(256, len(tokens) - (total - budget))
-        last["content"] = llm.detokenize(tokens[:keep]).decode(errors="ignore") + "\n[…testo troncato…]"
+        last["content"] = llm.detokenize(tokens[:keep]).decode(errors="ignore") + "\n[…text truncated…]"
         return messages[:-1] + [last]
 
     # ---------------------------------------------------------------- vettori

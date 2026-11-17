@@ -63,8 +63,10 @@ def extract_paths(text: str, home: Path | None = None) -> list[Path]:
     return found
 
 
-YES = {"si", "s", "y", "yes", "ok", "okay", "conferma", "confermo", "procedi", "vai", "fallo", "certo", "esegui"}
-NO = {"no", "n", "annulla", "stop", "lascia stare", "non farlo", "niente"}
+YES = {"si", "s", "y", "yes", "ok", "okay", "conferma", "confermo", "procedi", "vai", "fallo", "certo", "esegui",
+       "sure", "yep", "yeah", "go", "go ahead", "do it", "confirm", "proceed", "of course"}
+NO = {"no", "n", "annulla", "stop", "lascia stare", "non farlo", "niente", "nope", "cancel", "don't",
+      "dont", "never mind", "nevermind", "abort"}
 
 
 def parse(text: str, home: Path | None = None) -> Intent:

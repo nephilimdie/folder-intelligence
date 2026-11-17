@@ -11,36 +11,39 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .i18n import _
 from .intents import HOME_ALIASES
 
-# Frasi proposte quando si scrive all'inizio della riga.
-COMMANDS = [
-    "analizza la cartella ",
-    "trovami i duplicati",
-    "cancella i duplicati",
-    "trova foto simili",
-    "trova elementi simili",
-    "trova documenti simili",
-    "classifica i file",
-    "che file ci sono?",
-    "organizza i file",
-    "organizza in ",
-    "mostrami i 10 file più grandi",
-    "cerca ",
-    "riepilogo",
-    "esporta il report in md",
-    "esporta il report in json",
-    "esporta il report in csv",
-    "annulla l'ultima operazione",
-    "ricordami di ",
-    "cosa ricordi?",
-    "vai in ",
-    "aiuto",
-    "esci",
-]
+# Frasi proposte quando si scrive all'inizio della riga, per lingua (vedi i18n).
+COMMANDS_BY_LANG = {
+    "it": [
+        "analizza la cartella ", "trovami i duplicati", "cancella i duplicati", "trova foto simili",
+        "trova elementi simili", "trova documenti simili", "classifica i file", "che file ci sono?",
+        "organizza i file", "organizza in ", "mostrami i 10 file più grandi", "cerca ", "riepilogo",
+        "esporta il report in md", "esporta il report in json", "esporta il report in csv",
+        "annulla l'ultima operazione", "ricordami di ", "cosa ricordi?", "vai in ", "aiuto", "esci",
+    ],
+    "en": [
+        "analyze the folder ", "find duplicates", "delete the duplicates", "find similar photos",
+        "find similar items", "find similar documents", "classify the files", "what files are there?",
+        "organize the files", "organize into ", "show me the 10 largest files", "search ", "summary",
+        "export the report as md", "export the report as json", "export the report as csv",
+        "undo the last operation", "remind me to ", "what do you remember?", "go to ", "help", "exit",
+    ],
+}
+
+
+def commands() -> list[str]:
+    from .i18n import lang
+
+    return COMMANDS_BY_LANG.get(lang(), COMMANDS_BY_LANG["en"])
+
+
+COMMANDS = COMMANDS_BY_LANG["it"]  # compatibilità
 
 # Parole dopo le quali ha senso proporre una cartella anche senza "/" iniziale.
-FOLDER_TRIGGERS = {"cartella", "folder", "in", "nella", "dentro", "analizza", "scansiona", "vai"}
+FOLDER_TRIGGERS = {"cartella", "folder", "in", "nella", "dentro", "analizza", "scansiona", "vai",
+                   "into", "inside", "to", "analyze", "analyse", "scan", "directory"}
 
 MAX_RESULTS = 50
 
@@ -92,7 +95,7 @@ def complete_path(token: str, cwd: Path, home: Path | None = None) -> list[Compl
     """Completa `token` (es. '~/Doc', '/Us', 'sub/a', 'My\\ Fo') con le sole cartelle."""
     home = home or Path.home()
     raw = unescape_path(token)
-    head, _, prefix = raw.rpartition("/")
+    head, _sep, prefix = raw.rpartition("/")
     if "/" in raw:
         head_dir = head + "/" if head else "/"
     else:
@@ -111,7 +114,7 @@ def complete_path(token: str, cwd: Path, home: Path | None = None) -> list[Compl
     result = []
     for name in _list_dirs(base, prefix, include_hidden=prefix.startswith(".")):
         full = f"{head_dir}{name}/"
-        result.append(Completion(escape_path(full), -len(token), name + "/", "cartella"))
+        result.append(Completion(escape_path(full), -len(token), name + "/", _("cartella")))
     return result
 
 
@@ -130,8 +133,8 @@ def complete(text_before_cursor: str, cwd: Path, home: Path | None = None) -> li
     # 2) inizio riga → frasi di comando
     if not before.strip():
         low = text_before_cursor.lower()
-        return [Completion(c, -len(text_before_cursor), c.strip(), "comando")
-                for c in COMMANDS if c.startswith(low) and c != low]
+        return [Completion(c, -len(text_before_cursor), c.strip(), _("comando"))
+                for c in commands() if c.startswith(low) and c != low]
 
     # 3) dopo "cartella"/"in"/... → alias (Downloads, Scrivania…) + sottocartelle
     if prev in FOLDER_TRIGGERS:
@@ -149,8 +152,8 @@ def complete(text_before_cursor: str, cwd: Path, home: Path | None = None) -> li
 
     # 4) altrove: le frasi intere che iniziano come la riga scritta
     low = text_before_cursor.lower()
-    return [Completion(c, -len(text_before_cursor), c.strip(), "comando")
-            for c in COMMANDS if c.startswith(low) and c != low]
+    return [Completion(c, -len(text_before_cursor), c.strip(), _("comando"))
+            for c in commands() if c.startswith(low) and c != low]
 
 
 def prompt_toolkit_completer(get_cwd):

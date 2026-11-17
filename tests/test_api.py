@@ -67,7 +67,7 @@ def test_plan_apply_audit_undo(client, sample_dir):
     assert client.post(f"/plans/{plan['id']}/apply", headers=H).status_code == 404  # mai due volte
 
     ops = client.get("/operations", headers=H).json()
-    assert ops["items"][0]["status"] == "eseguita" and ops["items"][0]["source"] == "api"
+    assert ops["items"][0]["status"] == "done" and ops["items"][0]["source"] == "api"
     detail = client.get(f"/operations/{res['operation_id']}", headers=H).json()
     assert len(detail["moves"]) == 2
 

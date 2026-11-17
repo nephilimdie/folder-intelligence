@@ -18,6 +18,7 @@ from .ai import (DEFAULT_EMBED_ENGINE, DEFAULT_EMBED_MODEL, DEFAULT_ENGINE, DEFA
                  DEFAULT_VISION_MODEL, create_ai)
 from .engines import ENGINES
 from .classifier import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL
+from .i18n import SUPPORTED, N_, _, is_question, set_language, strip_question_marker
 from .intents import Intent
 from .mcp_memory import MODES, McpMemory
 from .memory import create_memory
@@ -46,13 +47,13 @@ def status(msg: str) -> None:
 
 # --------------------------------------------------------------------- progress
 PHASE_LABELS = {
-    "scan": "🔍 Cerco i file",
-    "hash": "🧬 Confronto i contenuti",
-    "hash_full": "🧬 Verifica completa",
-    "classify": "🤖 Classifico",
-    "analyze": "🧠 Leggo i contenuti",
-    "fingerprint": "🖼️  Impronte delle foto",
-    "compare": "🔗 Confronto",
+    "scan": N_("🔍 Cerco i file"),
+    "hash": N_("🧬 Confronto i contenuti"),
+    "hash_full": N_("🧬 Verifica completa"),
+    "classify": N_("🤖 Classifico"),
+    "analyze": N_("🧠 Leggo i contenuti"),
+    "fingerprint": N_("🖼️  Impronte delle foto"),
+    "compare": N_("🔗 Confronto"),
 }
 
 
@@ -95,7 +96,7 @@ class ProgressDisplay:
         self._last_plain = ""
 
     def __call__(self, phase: str, done: int, total: int | None, detail: str = "") -> None:
-        label = PHASE_LABELS.get(phase, phase)
+        label = _(PHASE_LABELS.get(phase, phase))
         with self._lock:
             if self._progress is not None:
                 if phase not in self._tasks:
@@ -180,54 +181,59 @@ class LineReader:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="folder-intelligence",
-        description="🤖 folderIntelligence — trova duplicati e organizza le tue cartelle con AI locale.",
+        description=_("🤖 folderIntelligence — trova duplicati e organizza le tue cartelle con AI locale."),
     )
-    p.add_argument("directory", nargs="?", default="~/Downloads", help="cartella da analizzare (default: ~/Downloads)")
-    p.add_argument("-i", "--interactive", action="store_true", help="chat interattiva (default se non indichi altre azioni)")
-    p.add_argument("--full-scan", action="store_true", help="classifica i file (regole + Ollama)")
-    p.add_argument("--duplicates", action="store_true", help="elenca i duplicati")
-    p.add_argument("--dedupe", action="store_true", help="sposta nel Cestino le copie duplicate (dry-run senza --apply)")
-    p.add_argument("--organize", action="store_true", help="organizza in cartelle per categoria (dry-run senza --apply)")
-    p.add_argument("--target", help="cartella di destinazione per --organize")
-    p.add_argument("--apply", action="store_true", help="esegue davvero --dedupe/--organize")
-    p.add_argument("--history", action="store_true", help="mostra l'audit delle modifiche ai file")
+    p.add_argument("directory", nargs="?", default="~/Downloads", help=_("cartella da analizzare (default: ~/Downloads)"))
+    p.add_argument("-i", "--interactive", action="store_true", help=_("chat interattiva (default se non indichi altre azioni)"))
+    p.add_argument("--lang", choices=SUPPORTED, default=None,
+                   help=_("lingua dell'interfaccia e delle risposte (default: lingua di macOS; anche FI_LANG)"))
+    p.add_argument("--full-scan", action="store_true", help=_("classifica i file (regole + AI)"))
+    p.add_argument("--duplicates", action="store_true", help=_("elenca i duplicati"))
+    p.add_argument("--dedupe", action="store_true", help=_("sposta nel Cestino le copie duplicate (dry-run senza --apply)"))
+    p.add_argument("--organize", action="store_true", help=_("organizza in cartelle per categoria (dry-run senza --apply)"))
+    p.add_argument("--target", help=_("cartella di destinazione per --organize"))
+    p.add_argument("--apply", action="store_true", help=_("esegue davvero --dedupe/--organize"))
+    p.add_argument("--history", action="store_true", help=_("mostra l'audit delle modifiche ai file"))
     p.add_argument("--undo", nargs="?", const="last", metavar="ID",
-                   help="annulla l'ultima operazione, o quella indicata (id o numero dello storico)")
-    p.add_argument("--index", action="store_true", help="legge e comprende il contenuto dei file (indice)")
-    p.add_argument("--search", metavar="TESTO", help="cerca per nome, contenuto e significato")
-    p.add_argument("--ask", metavar="DOMANDA", help="domanda sul contenuto dei documenti indicizzati")
-    p.add_argument("--export", choices=exporter.FORMATS, help="esporta un report (json, md, csv)")
-    p.add_argument("-o", "--output", help="file di output per --export")
-    p.add_argument("--classic", action="store_true", help="chat semplice, senza pannello attività")
+                   help=_("annulla l'ultima operazione, o quella indicata (id o numero dello storico)"))
+    p.add_argument("--index", action="store_true", help=_("legge e comprende il contenuto dei file (indice)"))
+    p.add_argument("--search", metavar=_("TESTO"), help=_("cerca per nome, contenuto e significato"))
+    p.add_argument("--ask", metavar=_("DOMANDA"), help=_("domanda sul contenuto dei documenti indicizzati"))
+    p.add_argument("--export", choices=exporter.FORMATS, help=_("esporta un report (json, md, csv)"))
+    p.add_argument("-o", "--output", help=_("file di output per --export"))
+    p.add_argument("--classic", action="store_true", help=_("chat semplice, senza pannello attività"))
     p.add_argument("--no-mouse", action="store_true",
-                   help="non catturare il mouse (selezione testo nativa; si scorre con PagSu/PagGiù)")
-    p.add_argument("--serve", action="store_true", help="avvia le API HTTP locali per l'app Mac")
-    p.add_argument("--host", default="127.0.0.1", help="host API (default 127.0.0.1)")
-    p.add_argument("--port", type=int, default=8765, help="porta API (default 8765)")
-    p.add_argument("--memory", default="json", choices=["json", "inmemory", "lightrag"], help="backend memoria")
-    p.add_argument("--no-ai", action="store_true", help="non usare Ollama")
-    p.add_argument("--model", default=DEFAULT_OLLAMA_MODEL, help=f"modello testuale: nome Ollama (es. qwen2.5:14b, riusato anche da llama.cpp) o file .gguf "
-                        f"(default {DEFAULT_OLLAMA_MODEL})")
+                   help=_("non catturare il mouse (selezione testo nativa; si scorre con PagSu/PagGiù)"))
+    p.add_argument("--serve", action="store_true", help=_("avvia le API HTTP locali per l'app Mac"))
+    p.add_argument("--host", default="127.0.0.1", help=_("host API (default 127.0.0.1)"))
+    p.add_argument("--port", type=int, default=8765, help=_("porta API (default 8765)"))
+    p.add_argument("--memory", default="json", choices=["json", "inmemory", "lightrag"], help=_("backend memoria"))
+    p.add_argument("--no-ai", action="store_true", help=_("non usare l'AI locale"))
+    p.add_argument("--model", default=DEFAULT_OLLAMA_MODEL,
+                   help=_("modello testuale: nome Ollama (es. qwen2.5:14b, riusato anche da llama.cpp) o file "
+                          ".gguf (default {model})", model=DEFAULT_OLLAMA_MODEL))
     engines = ["auto", *ENGINES]
     p.add_argument("--engine", choices=engines, default=DEFAULT_ENGINE,
-                   help="motore AI per testo e router: auto (llama.cpp se disponibile, altrimenti Ollama), "
-                        "llamacpp (dentro l'app), ollama, mlx")
+                   help=_("motore AI per testo e router: auto (llama.cpp se disponibile, altrimenti Ollama), "
+                          "llamacpp (dentro l'app), ollama, mlx"))
     p.add_argument("--vision-engine", choices=engines, default=DEFAULT_VISION_ENGINE,
-                   help="motore per le immagini (auto = Ollama)")
+                   help=_("motore per le immagini (auto = Ollama)"))
     p.add_argument("--embed-engine", choices=engines, default=DEFAULT_EMBED_ENGINE,
-                   help="motore per gli embedding della ricerca semantica (auto = come --engine)")
+                   help=_("motore per gli embedding della ricerca semantica (auto = come --engine)"))
     p.add_argument("--router", choices=["ai", "rules"], default=None,
-                   help="come interpretare le frasi: ai (default, piano di comandi deciso dal modello) o rules")
+                   help=_("come interpretare le frasi: ai (default, piano di comandi deciso dal modello) o rules"))
     p.add_argument("--router-model", default=None,
-                   help="modello per interpretare le frasi (default = --model; es. qwen2.5:7b, più veloce)")
-    p.add_argument("--vision-model", default=DEFAULT_VISION_MODEL, help=f"modello per immagini (default {DEFAULT_VISION_MODEL})")
-    p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL, help=f"modello embedding (default {DEFAULT_EMBED_MODEL})")
-    p.add_argument("--no-vision", action="store_true", help="non usare il modello visivo (più veloce)")
-    p.add_argument("--index-limit", type=int, default=200, help="massimo file analizzati per 'indicizza'")
+                   help=_("modello per interpretare le frasi (default = --model; es. qwen2.5:7b, più veloce)"))
+    p.add_argument("--vision-model", default=DEFAULT_VISION_MODEL,
+                   help=_("modello per immagini (default {model})", model=DEFAULT_VISION_MODEL))
+    p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL,
+                   help=_("modello embedding (default {model})", model=DEFAULT_EMBED_MODEL))
+    p.add_argument("--no-vision", action="store_true", help=_("non usare il modello visivo (più veloce)"))
+    p.add_argument("--index-limit", type=int, default=200, help=_("massimo file analizzati per 'indicizza'"))
     p.add_argument("--mcp-mode", choices=MODES, default=None,
-                   help="cosa registrare nella memoria MCP: sealed (default, solo inventario), summary, off")
+                   help=_("cosa registrare nella memoria MCP: sealed (default, solo inventario), summary, off"))
     p.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
-    p.add_argument("--ai-limit", type=int, default=50, help="massimo file letti dall'AI per scansione")
+    p.add_argument("--ai-limit", type=int, default=50, help=_("massimo file letti dall'AI per scansione"))
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p
 
@@ -240,10 +246,11 @@ def build_ai(args: argparse.Namespace):
 
 async def ai_state_line(ai) -> str:
     if not ai:
-        return "disattivata"
+        return _("disattivata")
     if await ai.is_available():
-        return f"attiva — {ai.summary()}"
-    return f"non disponibile ({ai.model}, {ai.engine_of('text')}): {ai.why_unavailable('text')}"
+        return _("attiva — {summary}", summary=ai.summary())
+    return _("non disponibile ({model}, {engine}): {why}", model=ai.model, engine=ai.engine_of("text"),
+             why=ai.why_unavailable("text"))
 
 
 def make_assistant(args: argparse.Namespace, progress: ProgressDisplay) -> Assistant:
@@ -297,20 +304,20 @@ async def run_batch(args: argparse.Namespace, assistant: Assistant, progress: Pr
         out("")
         with progress:
             reply = await assistant.dispatch(intent)
-        out(reply.split("\nConfermi?")[0])
+        out(split_question(reply)[0])
         if assistant.pending:
             if args.apply:
                 out(await assistant.do_confirm(Intent("confirm")))
             else:
                 assistant.pending = None
-                out("(dry-run: aggiungi --apply per eseguire)", style="yellow")
+                out(_("(dry-run: aggiungi --apply per eseguire)"), style="yellow")
     if args.export:
         with progress:
             scan = await assistant.get_scan()
             await assistant.get_duplicates(scan)
             await assistant.ensure_classified(scan)
         path = exporter.export(scan, args.export, Path(args.output) if args.output else None)
-        out(f"\n📄 Report salvato in {path}")
+        out("\n" + _("📄 Report salvato in {path}", path=path))
     return 0
 
 
@@ -320,15 +327,15 @@ async def header_lines(assistant: Assistant) -> list[str]:
     ai_state = await ai_state_line(assistant.ai)
     try:
         crypto.master_key()
-        sec = f"🔐 dati dell'app cifrati (AES-256-GCM, chiave in: {crypto.key_location()})"
+        sec = _("🔐 dati dell'app cifrati (AES-256-GCM, chiave in: {where})", where=crypto.key_location())
     except Exception as e:  # noqa: BLE001
-        sec = f"⚠️  cifratura non disponibile: {e}"
+        sec = _("⚠️  cifratura non disponibile: {error}", error=e)
     mcp = assistant.mcp
-    mcp_state = ("disattivata" if mcp.mode == "off" else
-                 f"{mcp.mode} ({'raggiungibile' if await mcp.available() else 'non raggiungibile'})")
-    return [f"🤖 folderIntelligence {__version__}", f"Cartella: {assistant.directory}",
-            f"AI locale: {ai_state}", sec, f"Memoria MCP: {mcp_state}",
-            "Scrivi 'aiuto' per i comandi. Le operazioni lunghe vanno in background nel box Attività."]
+    mcp_state = (_("disattivata") if mcp.mode == "off" else
+                 f"{mcp.mode} ({_('raggiungibile') if await mcp.available() else _('non raggiungibile')})")
+    return [f"🤖 folderIntelligence {__version__}", _("Cartella: {dir}", dir=assistant.directory),
+            _("AI locale: {state}", state=ai_state), sec, _("Memoria MCP: {state}", state=mcp_state),
+            _("Scrivi 'aiuto' per i comandi. Le operazioni lunghe vanno in background nel box Attività.")]
 
 
 async def run_tui(assistant: Assistant, mouse: bool = True) -> int:
@@ -347,15 +354,16 @@ async def run_chat(assistant: Assistant, progress: ProgressDisplay) -> int:
 
     try:
         crypto.master_key()
-        sec = f"🔐 dati dell'app cifrati (AES-256-GCM, chiave in: {crypto.key_location()})"
+        sec = _("🔐 dati dell'app cifrati (AES-256-GCM, chiave in: {where})", where=crypto.key_location())
     except Exception as e:  # noqa: BLE001
-        sec = f"⚠️  cifratura non disponibile: {e}"
+        sec = _("⚠️  cifratura non disponibile: {error}", error=e)
     mcp = assistant.mcp
-    mcp_state = ("disattivata" if mcp.mode == "off" else
-                 f"{mcp.mode} ({'raggiungibile' if await mcp.available() else 'non raggiungibile'})")
-    header = (f"Cartella: {assistant.directory}\nAI locale: {ai_state}\n{sec}\nMemoria MCP: {mcp_state}\n\n"
-              "Scrivi 'aiuto' per i comandi, 'esci' per uscire.\n"
-              "Tab: completa cartelle e comandi · ↑/↓: comandi precedenti · Ctrl+C: interrompe")
+    mcp_state = (_("disattivata") if mcp.mode == "off" else
+                 f"{mcp.mode} ({_('raggiungibile') if await mcp.available() else _('non raggiungibile')})")
+    header = (_("Cartella: {dir}", dir=assistant.directory) + "\n" + _("AI locale: {state}", state=ai_state)
+              + f"\n{sec}\n" + _("Memoria MCP: {state}", state=mcp_state) + "\n\n"
+              + _("Scrivi 'aiuto' per i comandi, 'esci' per uscire.") + "\n"
+              + _("Tab: completa cartelle e comandi · ↑/↓: comandi precedenti · Ctrl+C: interrompe"))
     if _console:
         _console.print(Panel(header, title="🤖 folderIntelligence", border_style="cyan"))
     else:
@@ -365,22 +373,26 @@ async def run_chat(assistant: Assistant, progress: ProgressDisplay) -> int:
     interactive = reader.session is not None  # terminale vero con prompt_toolkit
     while True:
         try:
-            text = (await reader.read("\nTu › ")).strip()
+            text = (await reader.read("\n" + _("Tu › "))).strip()
         except (EOFError, KeyboardInterrupt):
-            out("\nA presto! 👋")
+            out("\n" + _("A presto! 👋"))
             return 0
         if not text:
             continue
         reply = await execute(assistant, progress, text)
         # conferme sì/no: selettore con le frecce invece di dover scrivere
-        while interactive and assistant.pending and not reply.startswith("A presto"):
+        while interactive and assistant.pending and not _is_exit(reply):
             body, question = split_question(reply)
             show(body)
             answer = await ask_confirmation(assistant, question)
             reply = await execute(assistant, progress, "sì" if answer else "no")
         show(reply)
-        if reply.startswith("A presto"):
+        if _is_exit(reply):
             return 0
+
+
+def _is_exit(reply: str) -> bool:
+    return getattr(reply, "data", {}).get("command") == "exit"
 
 
 def show(reply: str) -> None:
@@ -393,11 +405,21 @@ def split_question(reply: str) -> tuple[str, str]:
     """Separa il testo dalla domanda finale ('… Confermi? (sì/no) …') da mostrare nel selettore."""
     lines = reply.rstrip().splitlines()
     for i in range(len(lines) - 1, -1, -1):
-        if "(sì/no)" in lines[i]:
-            question = lines[i].replace(" (sì/no)", "").replace("(sì/no)", "").strip()
+        if is_question(lines[i]):
             body = "\n".join(lines[:i]).rstrip()
-            return body, question
-    return reply, "Confermi?"
+            return body, strip_question_marker(lines[i])
+    return reply, _("Confermi?")
+
+
+def confirmation_options(kind: str) -> list[tuple[bool, str]]:
+    """Etichette del selettore sì/no (condivise con l'interfaccia a pannelli)."""
+    if kind == "index":
+        return [(True, _("Sì, leggi i file")), (False, _("No, non ora"))]
+    if kind == "dedupe":
+        return [(True, _("Sì, sposta nel Cestino")), (False, _("No, annulla"))]
+    if kind == "organize":
+        return [(True, _("Sì, organizza")), (False, _("No, annulla"))]
+    return [(True, _("Sì, procedi")), (False, _("No"))]
 
 
 async def ask_confirmation(assistant: Assistant, question: str) -> bool:
@@ -406,13 +428,10 @@ async def ask_confirmation(assistant: Assistant, question: str) -> bool:
 
     pending = assistant.pending
     if isinstance(pending, PendingAction):
-        options = [(True, "Sì, procedi"), (False, "No")]
-        if pending.kind == "index":
-            options = [(True, "Sì, leggi i file"), (False, "No, non ora")]
+        options = confirmation_options(pending.kind)
         default = 0
     else:  # modifiche ai file: il default è "No" per sicurezza
-        verb = "sposta nel Cestino" if getattr(pending, "kind", "") == "dedupe" else "organizza"
-        options = [(True, f"Sì, {verb}"), (False, "No, annulla")]
+        options = confirmation_options(getattr(pending, "kind", ""))
         default = 1
     out("")
     try:
@@ -443,7 +462,7 @@ async def execute(assistant: Assistant, progress: ProgressDisplay, text: str) ->
         with progress:
             return await task
     except (asyncio.CancelledError, KeyboardInterrupt):
-        return "⏹️  Interrotto. Nessun file è stato modificato."
+        return _("⏹️  Interrotto. Nessun file è stato modificato.")
     finally:
         try:
             loop.remove_signal_handler(signal.SIGINT)
@@ -477,21 +496,28 @@ def main(argv: list[str] | None = None) -> int:
     try:
         code = _main(argv)
     except KeyboardInterrupt:
-        out("\nA presto! 👋")
+        out("\n" + _("A presto! 👋"))
         code = 130
     except Exception as e:  # errore inatteso: messaggio chiaro, niente traceback
-        out(f"\n❌ Errore inatteso: {e}", style="red")
+        out("\n" + _("❌ Errore inatteso: {error}", error=e), style="red")
         if os.environ.get("FI_DEBUG"):
             import traceback
 
             traceback.print_exc()
         else:
-            out("   (avvia con FI_DEBUG=1 per i dettagli tecnici)", style="dim")
+            out("   " + _("(avvia con FI_DEBUG=1 per i dettagli tecnici)"), style="dim")
         code = 1
     shutdown(code)
 
 
 def _main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    # la lingua serve già per i testi di --help: la leggiamo prima di costruire il parser
+    for i, a in enumerate(argv):
+        if a == "--lang" and i + 1 < len(argv):
+            set_language(argv[i + 1])
+        elif a.startswith("--lang="):
+            set_language(a.split("=", 1)[1])
     args = build_parser().parse_args(argv)
 
     if args.serve:
@@ -504,7 +530,7 @@ def _main(argv: list[str] | None = None) -> int:
 
     directory = Path(args.directory).expanduser()
     if not directory.is_dir() and not (args.undo or args.history):
-        out(f"❌ La cartella {directory} non esiste.", style="red")
+        out(_("❌ La cartella {path} non esiste.", path=directory), style="red")
         return 2
     progress = ProgressDisplay()
     assistant = make_assistant(args, progress)

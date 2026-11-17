@@ -1,430 +1,454 @@
 # 🤖 folderIntelligence
 
-Parla con le tue cartelle: trova file duplicati, **comprende il contenuto** di documenti,
-PDF (anche scansionati), immagini, Office, audio e video, li cerca per significato e li
-organizza. Tutto con AI locale (llama.cpp dentro l'app e/o Ollama): nessun dato lascia il Mac.
+*English · [Italiano](README.it.md)*
 
-## Installazione
+Talk to your folders: find duplicate files, **understand the content** of documents, PDFs
+(scanned ones too), images, Office files, audio and video, search them by meaning and organize
+them. Everything runs with local AI (llama.cpp inside the app and/or Ollama): no data leaves your Mac.
+
+## Installation
 
 ```bash
 cd ~/Progetti/folder-intelligence
 python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"     # oppure: .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e ".[dev]"     # or: .venv/bin/pip install -r requirements.txt
 ```
 
-AI locale (opzionale, consigliata):
+Local AI (optional, recommended):
 
 ```bash
-pip install llama-cpp-python # motore dentro l'app per testo e ricerca (vedi "Motori AI")
-ollama pull qwen2.5:14b      # scarica i modelli (llama.cpp riusa gli stessi file)
+pip install llama-cpp-python # in-app engine for text and search (see "AI engines")
+ollama pull qwen2.5:14b      # download the models (llama.cpp reuses the same files)
 ollama pull bge-m3
-ollama pull qwen3.5:9b       # immagini: serve `ollama serve` attivo
+ollama pull qwen3.5:9b       # images: needs `ollama serve` running
 ```
 
-Modelli usati (tutti opzionali, configurabili con `--model`, `--vision-model`, `--embed-model`):
+Models used (all optional, configurable with `--model`, `--vision-model`, `--embed-model`):
 
-| Ruolo | Default | Serve per |
+| Role | Default | Used for |
 |---|---|---|
-| testo | `qwen2.5:14b` | categoria, descrizione, tag, risposte alle domande |
-| visione | `qwen3.5:9b` | descrivere foto, screenshot, scansioni, fotogrammi video |
-| embedding | `bge-m3` | ricerca per significato (multilingue) |
+| text | `qwen2.5:14b` | category, description, tags, answers to questions, request router |
+| vision | `qwen3.5:9b` | describing photos, screenshots, scans, video frames |
+| embeddings | `bge-m3` | search by meaning (multilingual) |
 
-Strumenti di sistema usati se presenti: `tesseract` (OCR), `pdftotext`/`pdftoppm` (poppler),
+System tools used when present: `tesseract` (OCR), `pdftotext`/`pdftoppm` (poppler),
 `ffprobe`/`ffmpeg`, `sips`, `textutil`, `mdls`/`mdfind` (Spotlight).
-Senza AI tutto funziona lo stesso: si usano regole, OCR e ricerca testuale.
+Without AI everything still works: rules, OCR and text search are used instead.
 
-## Uso
+## Languages
 
-### Chat interattiva
+The interface, the answers and the AI-generated content (titles, descriptions, tags) are in
+**English** or **Italian**. The language follows macOS; change it with `--lang en|it` or `FI_LANG`.
+Commands can be written in either language, and search also finds documents written in the other
+one (bge-m3 embeddings are multilingual and queries are expanded in English and Italian).
+The API picks the language per request from the `Accept-Language` header (or `?lang=`).
+
+Translations live in `src/folder_intelligence/locales/<language>.json` (gettext style: the Italian
+text in the code is the key, e.g. `_("Nessun file duplicato in {root}.", root=…)`). To add a
+language, copy `en.json`, translate the values and add the code to `SUPPORTED` in `i18n.py`;
+`tests/test_i18n.py` reports missing texts, mismatched placeholders and stale translations
+(`python -m folder_intelligence.i18n_extract --missing <language>` lists what is missing).
+
+## Usage
+
+### Interactive chat
 
 ```bash
-./start_chat.sh                          # chat su ~/Downloads
-.venv/bin/python __main__.py ~/Desktop   # chat su un'altra cartella
-folder-intelligence ~/Desktop            # se installato con pip install -e .
+./start_chat.sh                          # chat on ~/Downloads
+.venv/bin/python __main__.py ~/Desktop   # chat on another folder
+folder-intelligence ~/Desktop            # if installed with pip install -e .
 ```
 
 ```
-Tu › trovami i duplicati
-Trovati 3 gruppi di duplicati in ~/Downloads (4 copie, 12.3 MB recuperabili):
-[1] foto_vacanza.jpg — 4.1 MB × 2 (immagini)
-    ✅ tengo:  foto_vacanza.jpg
-    🗑️  copia: foto_vacanza copia.jpg
-Tu › cancella i duplicati
-Sposterò nel Cestino 4 copie (12.3 MB) … Confermi? (sì/no)
-Tu › sì
-✅ 4 file spostati nel Cestino.
-Tu › annulla l'ultima operazione
-↩️  Ripristinati 4 file nella posizione originale.
+You › find duplicates
+Found 3 groups of duplicates in ~/Downloads (4 copies, 12.3 MB recoverable):
+[1] holiday.jpg — 4.1 MB × 2 (images)
+    ✅ keep:   holiday.jpg
+    🗑️  copy:   holiday copy.jpg
+You › delete the duplicates
+I will move 4 copies (12.3 MB) to the Trash … Confirm? (yes/no)
+You › yes
+✅ 4 files moved to the Trash.
+You › undo the last operation
+↩️  Operation 3f2a9c: restored 4 files to their original location.
 ```
 
-La chat è a **pannelli**: conversazione a sinistra, box **Attività** a destra (sotto, se il
-terminale è stretto). Ogni richiesta diventa un'attività: se dura più di ~1,5 s passa in
-**background** e puoi continuare a scrivere; il box ne mostra fase, avanzamento, file in
-lavorazione e tempo. Al termine il risultato compare nella conversazione (con eventuale
-selettore di conferma). `attività` elenca quelle in corso, `ferma 3` interrompe la #3,
-Ctrl+C ferma l'ultima, Ctrl+D o `esci` chiude (chiedendo conferma se ci sono attività).
-`--classic` avvia la chat semplice senza pannelli.
+The chat has **panels**: the conversation on the left, the **Activity** box on the right (below,
+on narrow terminals). Every request becomes a task: if it takes more than ~1.5 s it moves to the
+**background** and you can keep typing; the box shows its phase, progress, current file and time.
+When it finishes, the result appears in the conversation (with a confirmation selector if needed).
+`activity` lists running tasks, `stop 3` stops #3, Ctrl+C stops the latest, Ctrl+D or `exit` quits
+(asking first if tasks are running). `--classic` starts the simple chat without panels.
 
-Per rileggere la conversazione: **rotellina/trackpad**, PagSu/PagGiù o ⇧↑/⇧↓; Esc o Fine tornano
-in fondo. Se arrivano risultati mentre stai leggendo più in alto, la vista resta ferma e compare
-l'avviso "● nuovi messaggi". Poiché l'app riceve il mouse, per **selezionare testo** tieni premuto
-⌥ Option mentre trascini; in alternativa avvia con `--no-mouse` (o `FI_MOUSE=0`).
+To read back: **mouse wheel/trackpad**, PgUp/PgDn or ⇧↑/⇧↓; Esc or End jump to the bottom. If
+results arrive while you are reading further up, the view stays put and "● new messages" appears.
+Since the app captures the mouse, hold ⌥ Option while dragging to **select text**, or start with
+`--no-mouse` (or `FI_MOUSE=0`).
 
-Nella chat:
-- **Tab** completa cartelle (`~/Doc` → `~/Documents/`, anche con spazi: `Foto\ Vacanze/`) e comandi (`trov` → `trovami i duplicati`);
-- **↑/↓** scorrono i comandi precedenti (salvati in `~/.folder_intelligence/history`, anche tra sessioni); il suggerimento grigio si accetta con →;
-- le conferme (indicizzare, spostare nel Cestino, organizzare) si danno con un **selettore**:
-  ←/→ per scegliere, Invio per confermare, `s`/`n` come scorciatoie, Esc per annullare.
-  Per le modifiche ai file l'opzione preselezionata è "No";
-- durante scansioni e classificazione compare una barra di avanzamento (🔍 ricerca file → 🧬 confronto contenuti → 🤖 classificazione).
+In the chat:
+- **Tab** completes folders (`~/Doc` → `~/Documents/`, spaces too: `Holiday\ Photos/`) and commands (`find d` → `find duplicates`);
+- **↑/↓** browse previous commands (encrypted, kept across sessions); accept the grey suggestion with →;
+- confirmations (indexing, moving to the Trash, organizing) use a **selector**: ←/→ to choose,
+  Enter to confirm, Esc to cancel. For changes to files the preselected option is "No";
+- long operations show a progress bar (🔍 finding files → 🧬 comparing contents → 🤖 classifying).
 
-Comandi (linguaggio naturale, scrivi `aiuto` in chat):
+Commands (natural language, type `help` in the chat):
 
-| Frase | Cosa fa |
+| Request | What it does |
 |---|---|
-| `analizza la cartella Downloads`, `analizza ~/Desktop` | scansione e riepilogo |
-| `trovami i duplicati` | elenco gruppi di file identici |
-| `cancella i duplicati` | sposta le copie nel **Cestino** (con conferma) |
-| `trova foto simili` · `trova elementi simili` · `ci sono documenti quasi uguali?` | gruppi di file **simili ma non identici** (solo suggerimenti, nulla viene toccato) |
-| `classifica i file`, `che file ci sono?` | categorie (regole + AI sul contenuto) |
-| `organizza i file`, `organizza in ~/Archivio` | sposta in cartelle per categoria (con conferma) |
-| `mostrami i 10 file più grandi` | file più ingombranti (istantaneo) |
-| `indicizza la cartella` | legge e comprende il contenuto di ogni file |
-| `cosa contiene IMG_2041.HEIC?` | spiega cosa c'è in un file |
-| `cosa contiene la cartella Documents, fammi un riassunto` | panoramica di temi, tipi di documenti, periodi |
-| `cerca la ricevuta dell'hotel`, `trova i documenti sulla macchina` | ricerca per nome, contenuto e significato |
-| `quanto ho pagato l'hotel a Roma?` | risposta dai tuoi documenti, con fonti |
-| `esporta il report in json/csv/md` | salva un report |
-| `annulla l'ultima operazione` | ripristina i file spostati |
-| `mostra lo storico` | audit di tutte le modifiche ai file |
-| `annulla operazione 2`, `annulla operazione <id>` | ripristina un'operazione specifica |
-| `ricordami di …`, `cosa ricordi?` | memoria persistente |
-| `vai in ~/Documents` | cambia cartella di lavoro |
+| `analyze the Downloads folder`, `analyze ~/Desktop` | scan and summary |
+| `find duplicates` | groups of identical files |
+| `delete the duplicates` | moves the copies to the **Trash** (with confirmation) |
+| `find similar photos` · `find similar items` · `are there almost identical documents?` | groups of **similar but not identical** files (suggestions only, nothing is touched) |
+| `classify the files`, `what files are there?` | categories (rules + AI on the content) |
+| `organize the files`, `organize into ~/Archive` | moves into folders by category (with confirmation) |
+| `show me the 10 largest files` | biggest files (instant) |
+| `index the folder` | reads and understands the content of every file |
+| `what's in IMG_2041.HEIC?` | explains what a file contains |
+| `what's in the Documents folder, give me a summary` | overview of topics, document types, periods |
+| `search the hotel receipt`, `find the documents about the car` | search by name, content and meaning |
+| `how much did I pay for the hotel in Rome?` | answer from your documents, with sources |
+| `export the report as json/csv/md` | saves a report |
+| `undo the last operation` | restores the moved files |
+| `show the history` | audit of all changes to files |
+| `undo operation 2`, `undo operation <id>` | restores a specific operation |
+| `remind me to …`, `what do you remember?` | persistent memory |
+| `go to ~/Documents` | changes the working folder |
 
-Le frasi vengono interpretate dall'AI locale (vedi 'Come capisce le richieste').
+Requests are interpreted by the local AI (see "How requests are understood").
 
-### Motori AI (strategy pattern)
+### AI engines (strategy pattern)
 
-Il codice parla solo con una facciata (`ai.AIEngine`); sotto, ogni capacità usa un **motore**
-intercambiabile (`engines/`):
+The code only talks to a facade (`ai.AIEngine`); underneath, each capability uses an
+interchangeable **engine** (`engines/`):
 
-| Motore | Testo / router | Embedding | Immagini | Note |
+| Engine | Text / router | Embeddings | Images | Notes |
 |---|---|---|---|---|
-| `llamacpp` | ✅ | ✅ | — | dentro l'app (llama-cpp-python, GPU Metal); JSON vincolato da grammatica |
-| `ollama` | ✅ | ✅ | ✅ | servizio esterno `ollama serve` |
-| `mlx` | predisposto | predisposto | predisposto | non ancora implementato |
+| `llamacpp` | ✅ | ✅ | — | inside the app (llama-cpp-python, Metal GPU); JSON constrained by grammar |
+| `ollama` | ✅ | ✅ | ✅ | external `ollama serve` service |
+| `mlx` | prepared | prepared | prepared | not implemented yet |
 
-Predefinito (`auto`): **testo e embedding con llama.cpp** se installato e se il modello è
-disponibile, **immagini con Ollama**. Per scegliere: `--engine llamacpp|ollama|mlx|auto`,
-`--vision-engine …`, `--embed-engine …` (o `FI_ENGINE`, `FI_VISION_ENGINE`, `FI_EMBED_ENGINE`).
+Default (`auto`): **text and embeddings with llama.cpp** when installed and the model is
+available, **images with Ollama**. Choose with `--engine llamacpp|ollama|mlx|auto`,
+`--vision-engine …`, `--embed-engine …` (or `FI_ENGINE`, `FI_VISION_ENGINE`, `FI_EMBED_ENGINE`).
 
-llama.cpp **riusa i modelli già scaricati con Ollama** (`qwen2.5:14b`, `qwen2.5:7b`, `bge-m3`:
-nessun nuovo download) oppure un file `.gguf` qualsiasi (`--model ~/modelli/x.gguf`). I modelli
-salvati da Ollama nel formato a tensori separati (es. `qwen3.5:9b`) non sono leggibili da llama.cpp:
-per questo le immagini restano su Ollama. Gli embedding sono identici a quelli di Ollama
-(similarità 1.0), quindi l'indice esistente resta valido.
+llama.cpp **reuses the models already downloaded by Ollama** (`qwen2.5:14b`, `qwen2.5:7b`,
+`bge-m3`: nothing new to download) or any `.gguf` file (`--model ~/models/x.gguf`). Models that
+Ollama stores as separate tensors (e.g. `qwen3.5:9b`) can't be read by llama.cpp, which is why
+images stay on Ollama. Embeddings are identical to Ollama's (similarity 1.0), so an existing
+index stays valid.
 
-Memoria: i modelli si caricano al primo uso e si liberano dopo 10 minuti di inattività
-(`FI_LLAMA_IDLE`). Se Ollama tiene in memoria la stessa copia del modello, viene liberata
-(Ollama la ricarica da solo se serve); se la GPU è piena, llama.cpp libera i modelli di Ollama e
-riprova una volta (`FI_LLAMA_FREE_OLLAMA=0` per disattivare). Altre opzioni: `FI_LLAMA_CTX`
-(contesto, 8192), `FI_LLAMA_BATCH` (2048), `FI_LLAMA_FLASH_ATTN` (1).
+Memory: models load on first use and are released after 10 minutes of inactivity
+(`FI_LLAMA_IDLE`). If Ollama keeps the same model loaded, that copy is released (Ollama reloads it
+when needed); if the GPU is full, llama.cpp releases Ollama's models and retries once
+(`FI_LLAMA_FREE_OLLAMA=0` to disable). Other options: `FI_LLAMA_CTX` (context, 8192),
+`FI_LLAMA_BATCH` (2048), `FI_LLAMA_FLASH_ATTN` (1), `FI_LLAMA_EMBED_CTX` (2048).
 
-Installazione: `pip install llama-cpp-python` (si compila con Metal in qualche minuto).
+Installation: `pip install llama-cpp-python` (compiles with Metal in a few minutes).
 
-**Indicizzazione con poca memoria** (< 32 GB, o `FI_LOW_MEMORY=1`) e motori diversi per testo e
-immagini: i file vengono analizzati a blocchi di 16 (`FI_PHASE_BATCH`): prima le letture visive
-del blocco (modello di testo scaricato), poi la comprensione (modello visivo scaricato). I due
-modelli grandi non stanno mai in memoria insieme; il costo è qualche secondo di ricarica per blocco.
+**Indexing with little memory** (< 32 GB, or `FI_LOW_MEMORY=1`) and different engines for text
+and images: files are analyzed in blocks of 16 (`FI_PHASE_BATCH`): first the visual reads of the
+block (text model unloaded), then the understanding (vision model unloaded). The two large models
+are never in memory together; the cost is a few seconds of reloading per block.
 
-**Aggiungere un motore:** crea `engines/<nome>.py` con una sottoclasse di `EngineStrategy`
-(`generate_json`, `chat`, `describe_image`, `embed`, `available`) e registrala in
-`engines/__init__.py`. `GET /status` mostra quale motore serve ogni capacità.
+**Adding an engine:** create `engines/<name>.py` with a subclass of `EngineStrategy`
+(`generate_json`, `chat`, `describe_image`, `embed`, `available`, `release`) and register it in
+`engines/__init__.py`. `GET /status` shows which engine serves each capability.
 
-## Come capisce le richieste (router AI)
+## How requests are understood (AI router)
 
-Ogni frase passa da un **router**: l'AI locale riceve l'elenco dei comandi (raggruppati in
-analisi, ricerca, organizzazione, memoria, sistema, con i loro argomenti) e restituisce un **piano**
-di 1-4 passi, vincolato da uno schema JSON. Esempi:
+Every request goes through a **router**: the local AI receives the list of commands (grouped into
+analysis, search, organization, memory, system, with their arguments) and returns a **plan** of
+1-4 steps, constrained by a JSON schema. Examples:
 
-| Frase | Piano |
+| Request | Plan |
 |---|---|
-| `indicizza Documents e poi trova i documenti simili` | `index ~/Documents` → `similar ~/Documents (documents)` |
-| `quanto spazio sprecano i doppioni nei download? poi esporta un report csv` | `duplicates ~/Downloads` → `export csv` |
-| `ho fatto casino, rimetti tutto come prima` | `undo` |
-| `che differenza c'è tra jpg e png?` | nessun comando: risponde l'AI |
-| `rinomina tutte le foto con la data` | nessun comando: spiega che non può e cosa può fare |
+| `index Documents and then find similar documents` | `index ~/Documents` → `similar ~/Documents (documents)` |
+| `how much space do the duplicates in downloads waste? then export a csv report` | `duplicates ~/Downloads` → `export csv` |
+| `I made a mess, put everything back as it was` | `undo` |
+| `what's the difference between jpg and png?` | no command: the AI answers |
+| `rename all photos with their date` | no command: explains it can't and what it can do instead |
 
-Garanzie:
-- comandi inesistenti e argomenti non validi vengono scartati; l'AI non può inventare comandi;
-- al massimo **un** comando che modifica file per richiesta, sempre **per ultimo**, sempre con conferma;
-- se un passo chiede una conferma (es. "prima devo indicizzare: procedo?") il piano si ferma e
-  riprende dopo il "sì"; una nuova richiesta lo annulla;
-- un passo senza cartella usa quella del passo precedente;
-- scorciatoie senza AI (immediate): sì/no, esci, aiuto, annulla, vai in…, cronologia;
-- se il motore AI non è disponibile o non risponde entro 25s si usano le regole a parole chiave.
+Guarantees:
+- unknown commands and invalid arguments are dropped; the AI can't invent commands;
+- at most **one** command that modifies files per request, always **last**, always confirmed;
+- if a step asks for confirmation (e.g. "I need to index first: go ahead?") the plan pauses and
+  resumes after "yes"; a new request cancels it;
+- a step without a folder uses the previous step's folder;
+- instant shortcuts without AI: yes/no, exit, help, cancel, go to…, history;
+- if the AI engine is unavailable or doesn't answer within 25 s, keyword rules are used.
 
-Opzioni: `--router rules` (solo parole chiave), `--router-model qwen2.5:7b` (più veloce, meno preciso; funziona con qualsiasi motore;
-anche `FI_ROUTER_MODEL`). API: `POST /route {"message": …}` mostra il piano **senza** eseguirlo;
-`POST /chat` lo esegue e restituisce `data.route` e i risultati di ogni passo in `data.steps`.
-Nuovi comandi entrano automaticamente nel catalogo del router: basta `description`, `group`, `params`.
+Options: `--router rules` (keywords only), `--router-model qwen2.5:7b` (faster, less accurate; works
+with any engine; also `FI_ROUTER_MODEL`). API: `POST /route {"message": …}` shows the plan
+**without** running it; `POST /chat` runs it and returns `data.route` and each step's results in
+`data.steps`. New commands join the router's catalog automatically: `description`, `group` and
+`params` are all it needs.
 
-## Modalità batch (senza chat)
+## Batch mode (no chat)
 
 ```bash
-python3 __main__.py ~/Downloads --duplicates                 # elenca duplicati
-python3 __main__.py ~/Downloads --full-scan                  # classificazione completa
-python3 __main__.py ~/Downloads --dedupe                     # dry-run rimozione duplicati
-python3 __main__.py ~/Downloads --dedupe --apply             # esegue (Cestino)
-python3 __main__.py ~/Downloads --organize --target ~/Archivio --apply
+python3 __main__.py ~/Downloads --duplicates                 # list duplicates
+python3 __main__.py ~/Downloads --full-scan                  # full classification
+python3 __main__.py ~/Downloads --dedupe                     # dry run of duplicate removal
+python3 __main__.py ~/Downloads --dedupe --apply             # run it (Trash)
+python3 __main__.py ~/Downloads --organize --target ~/Archive --apply
 python3 __main__.py ~/Downloads --export csv -o report.csv
-python3 __main__.py ~/Documents --index                      # indicizza i contenuti
-python3 __main__.py ~/Documents --search "polizza auto"
-python3 __main__.py ~/Documents --ask "quando scade l'affitto?"
-python3 __main__.py --history                                # audit delle modifiche
-python3 __main__.py --undo                                   # annulla l'ultima operazione
-python3 __main__.py --undo 3f2a9c                            # annulla un'operazione specifica (id o n°)
+python3 __main__.py ~/Documents --index                      # index the contents
+python3 __main__.py ~/Documents --search "car insurance"
+python3 __main__.py ~/Documents --ask "when does the lease expire?"
+python3 __main__.py --history                                # audit of changes
+python3 __main__.py --undo                                   # undo the last operation
+python3 __main__.py --undo 3f2a9c                            # undo a specific operation (id or number)
 ```
 
-Opzioni: `--no-ai`, `--no-vision`, `--model`, `--vision-model`, `--embed-model`, `--ollama-url`,
-`--ai-limit N`, `--index-limit N`, `--memory json|inmemory|lightrag`.
+Options: `--lang`, `--no-ai`, `--no-vision`, `--model`, `--vision-model`, `--embed-model`,
+`--ollama-url`, `--ai-limit N`, `--index-limit N`, `--memory json|inmemory|lightrag`.
 
-## Comprensione dei contenuti (document intelligence)
+## Content understanding (document intelligence)
 
-`indicizza` analizza ogni file con il primo **estrattore** adatto, poi l'AI ne ricava
-categoria, titolo, descrizione, tag, data e importo; infine calcola l'embedding.
-Il risultato va nell'indice locale `~/.folder_intelligence/index.db` (SQLite + FTS5),
-aggiornato in modo incrementale (rianalizza solo i file cambiati).
+`index` analyzes each file with the first suitable **extractor**, then the AI derives its
+category, title, description, tags, date and amount; finally it computes the embedding.
+The result goes into the local encrypted index (SQLite + FTS5), updated incrementally (only
+changed files are analyzed again).
 
-| Tipo | Come viene letto |
+| Type | How it is read |
 |---|---|
-| testo, codice, CSV, JSON, email | lettura diretta |
-| PDF | `pdftotext`; se scansionato → OCR (`pdftoppm` + `tesseract`) + modello visivo |
-| Word/Excel/PowerPoint/OpenDocument | XML interno (nessuna dipendenza) |
+| text, code, CSV, JSON, email | read directly |
+| PDF | `pdftotext`; if scanned → OCR (`pdftoppm` + `tesseract`) + vision model |
+| Word/Excel/PowerPoint/OpenDocument | internal XML (no dependencies) |
 | .doc, .rtf, .html, .webarchive | `textutil` (macOS) |
-| immagini (anche HEIC) | `sips` → OCR `tesseract` + descrizione col modello visivo |
-| audio/video | `ffprobe` (durata, tag, GPS) + fotogramma descritto dal modello visivo |
-| archivi zip/tar | elenco dei file contenuti |
-| qualsiasi file | metadati Spotlight (`mdls`: provenienza download, autore…) + `file` |
+| images (HEIC too) | `sips` → `tesseract` OCR + description by the vision model |
+| audio/video | `ffprobe` (duration, tags, GPS) + a frame described by the vision model |
+| zip/tar archives | list of contained files |
+| any file | Spotlight metadata (`mdls`: download origin, author…) + `file` |
 
-La **ricerca** fonde quattro segnali (reciprocal rank fusion): testo (FTS5, ignora accenti),
-significato (embedding, con query espansa dall'AI in sinonimi), Spotlight (`mdfind`) e nome file.
-Ogni risultato dice *perché* è stato trovato.
+**Search** merges four signals (reciprocal rank fusion): text (FTS5, accent-insensitive),
+meaning (embeddings, with the query expanded by the AI), Spotlight (`mdfind`) and file name.
+Each result says *why* it was found.
 
-**Servizio document-intelligence esterno (opzionale).** Se configuri
-`FI_DOCINTEL_URL` (es. `http://localhost:18081`) e `FI_DOCINTEL_TOKEN`, PDF e immagini passano
-prima dal servizio (OCR Tesseract + layout docling + modello visivo); se non risponde si usano
-gli estrattori locali.
+**External document-intelligence service (optional).** If you set `FI_DOCINTEL_URL` (e.g.
+`http://localhost:18081`) and `FI_DOCINTEL_TOKEN`, PDFs and images go through that service first
+(Tesseract OCR + docling layout + vision model); if it doesn't answer, the local extractors are used.
 
-## Prestazioni e cartelle iCloud
+## Performance and iCloud folders
 
-- La scansione legge **solo i metadati** (nome, dimensione, data): migliaia di file in decimi di secondo.
-  Il contenuto viene letto solo quando serve (duplicati, indicizzazione).
-- Ricerca ("cerca"): un documento compare solo se è davvero pertinente — nel testo devono esserci
-  quasi tutte le parole cercate (2 su 2-3, metà oltre; articoli e forme elise come "dell'" ignorati)
-  e la somiglianza di significato deve superare 0.53 (`FI_SEMANTIC_MIN`; misurato: pertinenti
-  0.55–0.71, estranei ≤ 0.50). Se niente è pertinente risponde "nessun file pertinente" e dice
-  quanti file non sono ancora stati letti. Le domande ("chiedi") usano criteri più larghi: le fonti
-  le sceglie poi il modello.
-- Elementi simili (`similarity.py`), solo suggerimenti:
-  - **foto**: impronta visiva dHash 64 bit (immagine ridotta a 9×8 con `sips`, legge anche HEIC/RAW);
-    simili se differiscono di ≤9 bit ("molto simili" ≤5, "vagamente simili" ≤13). Trova foto
-    ridimensionate, ricompresse (es. inviate su WhatsApp), convertite, raffiche. Impronte salvate
-    nell'indice cifrato: la seconda ricerca è istantanea. Suggerisce di tenere la più grande.
-  - **documenti**: testo dall'indice (serve "indicizza"), confronto su gruppi di 5 parole: stesso testo
-    in formati diversi (pdf/docx), bozze contenute nella versione finale. Suggerisce il più recente.
-  - **versioni dal nome** nella stessa cartella: `preventivo.pdf` / `preventivo v2.pdf` / `… FINALE` /
-    `… (1)`; le numerazioni (`estratto_1`, `_2`) non sono considerate versioni.
+- Scanning reads **metadata only** (name, size, date): thousands of files in tenths of a second.
+  Content is read only when needed (duplicates, indexing).
+- Search ("search"): a document appears only if it is really relevant — the text must contain most
+  of the words searched (2 of 2-3, half beyond; articles and elisions like Italian "dell'" ignored)
+  and the semantic similarity must exceed 0.53 (`FI_SEMANTIC_MIN`; measured: relevant 0.55–0.71,
+  unrelated ≤ 0.50). If nothing is relevant it says "no relevant files" and how many files haven't
+  been read yet. Questions ("ask") use looser criteria: the model then picks the sources.
+- Similar items (`similarity.py`), suggestions only:
+  - **photos**: 64-bit dHash visual fingerprint (image reduced to 9×8 with `sips`, HEIC/RAW too);
+    similar when they differ by ≤9 bits ("very similar" ≤5, "vaguely similar" ≤13). Finds resized,
+    recompressed (e.g. sent via WhatsApp), converted photos and bursts. Fingerprints are stored in
+    the encrypted index: the second search is instant. Suggests keeping the largest.
+  - **documents**: text from the index (needs "index"), compared on 5-word shingles: the same text
+    in different formats (pdf/docx), drafts contained in the final version. Suggests the most recent.
+  - **versions by name** in the same folder: `quote.pdf` / `quote v2.pdf` / `… FINAL` / `… (1)`;
+    numbering (`statement_1`, `_2`) is not considered a version.
   - API: `POST /commands/similar {"path": "~/Pictures", "args": {"kind": "images|documents|all",
-    "strictness": "strict|normal|loose"}}` → job in background, risultato in `result.data.groups`.
-- Pacchetti macOS (`.rtfd`, `.pages`, `.numbers`, `.key`, `.app`, librerie Foto…) sono trattati come un
-  file unico e mai aperti: spostarne il contenuto li romperebbe.
-- Duplicati: dimensione → hash dei primi 64KB → SHA-256 completo, in parallelo.
-  - **contenuto identico byte per byte** (non "simile": foto ridimensionate o PDF risalvati non sono duplicati);
-  - hardlink e cloni APFS (`cp -c`, "Duplica" del Finder su APFS) sono segnalati ma **non** contati come
-    spazio recuperabile, perché non occupano spazio in più;
-  - originale da tenere: nome senza segni di copia (`foto 2`, `(1)`, `copia`, `Copia di…`), poi fuori da
-    Download/Scrivania, poi il più vecchio;
-  - prima di cestinare ogni copia viene **ricontrollato** che originale e copia esistano e siano ancora
-    identici (i file possono essere cambiati dal Finder dopo la scansione); scansioni più vecchie di 2 minuti
-    vengono rifatte;
-  - "cancella tutto"/"eliminali" valgono come rimozione duplicati solo come frase secca: "cancella tutti i
-    file pdf" **non** viene interpretato come rimozione duplicati.
-- I file **solo su iCloud** (non scaricati) non vengono mai letti, per non forzarne il download.
-- Ogni lettura ha un **timeout**: un file bloccato dalla sincronizzazione viene saltato e segnalato,
-  non ferma più l'app. **Ctrl+C** interrompe l'operazione in corso.
+    "strictness": "strict|normal|loose"}}` → background job, result in `result.data.groups`.
+- macOS packages (`.rtfd`, `.pages`, `.numbers`, `.key`, `.app`, Photos libraries…) are treated as a
+  single file and never opened: moving their content would break them.
+- Duplicates: size → hash of the first 64KB → full SHA-256, in parallel.
+  - **byte-for-byte identical content** (not "similar": resized photos or re-saved PDFs are not duplicates);
+  - hardlinks and APFS clones (`cp -c`, Finder "Duplicate" on APFS) are reported but **not** counted
+    as recoverable space, because they take no extra space;
+  - the original kept: a name without copy markers (`photo 2`, `(1)`, `copy`, `Copy of…`), then outside
+    Downloads/Desktop, then the oldest;
+  - before trashing each copy it is **re-checked** that original and copy exist and are still identical
+    (files may change in Finder after the scan); scans older than 2 minutes are redone;
+  - "delete everything"/"delete them" mean duplicate removal only as a bare phrase: "delete all pdf
+    files" is **not** interpreted as duplicate removal.
+- **iCloud-only** files (not downloaded) are never read, so as not to force a download.
+- Every read has a **timeout**: a file locked by syncing is skipped and reported instead of freezing
+  the app. **Ctrl+C** interrupts the running operation.
 
-## Privacy e cifratura
+## Privacy and encryption
 
-Tutto ciò che l'app salva è **cifrato a riposo con AES-256-GCM**; la chiave master (256 bit,
-casuale) sta nel **Portachiavi di macOS** (servizio `folder-intelligence`). Cartella dati
-`~/.folder_intelligence` con permessi 0700, file 0600.
+Everything the app stores is **encrypted at rest with AES-256-GCM**; the master key (256 bits,
+random) is in the **macOS Keychain** (service `folder-intelligence`). Data folder
+`~/.folder_intelligence` with permissions 0700, files 0600.
 
-| Dato | File | Protezione |
+| Data | File | Protection |
 |---|---|---|
-| indice dei contenuti (testi, OCR, descrizioni, embedding) | `index.db.enc` | DB SQLite cifrato per intero, usato solo in memoria |
-| memoria/note | `memory.enc` | cifrata |
-| audit delle modifiche | `audit.jsonl` | ogni riga cifrata e autenticata (manomissioni rilevate) |
-| cronologia comandi (↑/↓) | `history.enc` | ogni voce cifrata |
-| stato sincronizzazione MCP | `mcp_state.enc` | cifrato |
+| content index (text, OCR, descriptions, embeddings, photo fingerprints) | `index.db.enc` | whole SQLite DB encrypted, used only in memory |
+| memory/notes | `memory.enc` | encrypted |
+| audit of changes | `audit.jsonl` | each line encrypted and authenticated (tampering detected) |
+| command history (↑/↓) | `history.enc` | each entry encrypted |
+| MCP sync state | `mcp_state.enc` | encrypted |
 
-I vecchi file in chiaro vengono migrati automaticamente e sovrascritti prima della cancellazione.
-I file temporanei (immagini convertite, pagine PDF renderizzate) sono in una cartella 0700
-rimossa all'uscita. I report esportati (`esporta …`) sono invece in chiaro, perché li chiedi tu.
+Old plaintext files are migrated automatically and overwritten before deletion. Temporary files
+(converted images, rendered PDF pages) are in a 0700 folder removed on exit. Exported reports
+(`export …`) are plaintext, because you ask for them.
 
-Limiti onesti: chi usa la tua sessione macOS sbloccata può leggere il Portachiavi; su SSD/APFS
-la sovrascrittura non garantisce la distruzione fisica dei vecchi blocchi (FileVault la copre).
+Honest limits: whoever uses your unlocked macOS session can read the Keychain; on SSD/APFS
+overwriting does not guarantee physical destruction of old blocks (FileVault covers that).
 
-## Memoria MCP (local-memory)
+## MCP memory (local-memory)
 
-Dopo ogni `indicizza`, la comprensione dei file viene registrata nella memoria MCP condivisa
-(`local-memory`, `http://127.0.0.1:8000`, namespace `files:folder-intelligence`), sostituendo
-la versione precedente (`supersedes`). Poiché quella memoria è **condivisa con tutti gli agenti**
-(alcuni inviano il contesto a modelli cloud) e non è cifrata da questa app, ci sono 3 modalità:
+After every `index`, the understanding of the files is recorded in the shared MCP memory
+(`local-memory`, `http://127.0.0.1:8000`, namespace `files:folder-intelligence`), replacing the
+previous version (`supersedes`). Since that memory is **shared with every agent** (some send context
+to cloud models) and is not encrypted by this app, there are 3 modes:
 
-| `--mcp-mode` / `FI_MCP_MODE` | Cosa finisce nella memoria MCP |
+| `--mcp-mode` / `FI_MCP_MODE` | What goes into the MCP memory |
 |---|---|
-| `sealed` (default) | un inventario per cartella: quanti file per categoria/tipo e periodo. Nessun nome, titolo, testo o sottocartella |
-| `summary` | anche una voce per file: titolo, tipo, data, descrizione e tag, ripuliti da email, IBAN, CF, telefoni, targhe, numeri lunghi (i nomi propri possono restare) |
-| `off` | niente |
+| `sealed` (default) | one inventory per folder: how many files per category/type and period. No names, titles, text or subfolders |
+| `summary` | also one entry per file: title, type, date, description and tags, cleaned of emails, IBANs, tax codes, phone numbers, plates, long numbers (proper names may remain) |
+| `off` | nothing |
 
-## Sicurezza
+## Safety
 
-- Nessuna cancellazione definitiva: i duplicati vanno nel Cestino (`~/.Trash`).
-- Ogni operazione mostra prima il piano e chiede conferma (in batch serve `--apply`).
-- **Audit interno**: ogni modifica è registrata in `~/.folder_intelligence/audit.jsonl` (append-only,
-  una riga cifrata per evento, scrittura con lock + fsync). Per ogni file: origine, destinazione, dimensione,
-  data di modifica e SHA-256 (se noto), più la fonte (`cli`/`chat`/`api`). Gli annullamenti sono eventi a loro
-  volta: lo storico non viene mai riscritto. Si può annullare **qualsiasi** operazione, anche in parte
-  (es. se un file era sparito dal Cestino, lo si ripristina dopo). File modificati dopo lo spostamento
-  vengono ripristinati e segnalati.
-- File nascosti, symlink, `.git`, `node_modules` e bundle macOS (`.app`, `.photoslibrary`) vengono ignorati.
-- L'originale tenuto in ogni gruppo è quello senza "copia"/"(1)" nel nome, poi il più vecchio.
+- No permanent deletion: duplicates go to the Trash (`~/.Trash`).
+- Every operation shows its plan first and asks for confirmation (batch mode needs `--apply`).
+- **Internal audit**: every change is recorded in `~/.folder_intelligence/audit.jsonl` (append-only,
+  one encrypted line per event, written with lock + fsync). For each file: origin, destination, size,
+  modification date and SHA-256 (when known), plus the source (`cli`/`chat`/`api`). Undos are events
+  too: the history is never rewritten. **Any** operation can be undone, even partially (e.g. if a file
+  had disappeared from the Trash, it can be restored later). Files modified after the move are
+  restored and reported.
+- Hidden files, symlinks, `.git`, `node_modules` and macOS bundles are ignored.
 
-## API per l'app Mac
+## API for the Mac app
 
 ```bash
-folder-intelligence --serve                 # http://127.0.0.1:8765 · documentazione interattiva su /docs
+folder-intelligence --serve                 # http://127.0.0.1:8765 · interactive docs at /docs
 ```
 
-- In ascolto solo su `127.0.0.1`. Ogni endpoint (tranne `/health`) richiede
-  `Authorization: Bearer <token>`; il token è in `~/.folder_intelligence/api_token` (permessi 0600).
-- Lo schema OpenAPI (`/openapi.json`) può generare il client Swift (es. `swift-openapi-generator`).
-- Le modifiche passano dagli stessi piani, conferme e audit della CLI.
+- Listens on `127.0.0.1` only. Every endpoint (except `/health`) requires
+  `Authorization: Bearer <token>`; the token is in `~/.folder_intelligence/api_token` (0600).
+- Messages follow `Accept-Language` (`it`/`en`) or `?lang=`; operation statuses are stable codes
+  (`done`, `undone`, …) with a translated `status_label`.
+- The OpenAPI schema (`/openapi.json`) can generate the Swift client (e.g. `swift-openapi-generator`).
+- Changes go through the same plans, confirmations and audit as the CLI.
 
-| Metodo | Endpoint | Uso |
+| Method | Endpoint | Use |
 |---|---|---|
-| GET | `/health`, `/status` | stato server, AI disponibile |
-| POST | `/scans` `{path, duplicates, classify, index}` | avvia scansione/indicizzazione in background → `job` |
-| GET · DELETE | `/scans/{id}` | avanzamento (`phase`, `done`, `total`, `fraction`, `detail`) · annulla |
-| GET | `/commands` | tutti i comandi della chat, con parametri ed endpoint |
-| POST | `/commands/{name}` `{path, target, args, wait}` | esegue **qualsiasi comando** come job; risposta completa se finisce entro `wait` secondi, altrimenti `202` |
-| GET · DELETE | `/jobs` · `/jobs/{id}` | elenco/stato/risultato (testo + dati strutturati) · interrompe |
-| POST | `/jobs/{id}/confirm` `{confirm}` | risponde alle conferme (`needs_confirmation`): spostamenti, indicizzazione |
-| GET | `/jobs/events` | Server-Sent Events: avanzamento in tempo reale di tutti i job |
-| GET | `/search?q=&path=` | ricerca ibrida (con `matched_by`) |
-| POST | `/ask` `{question, path}` | risposta dai documenti con fonti |
-| GET | `/describe?path=` · `/index/stats` | analisi di un file · stato indice |
-| GET | `/summary?path=` | riepilogo cartella |
-| GET | `/files?path=&category=&q=&sort=&limit=&offset=` | elenco file paginato |
-| GET | `/duplicates?path=` | gruppi di duplicati |
-| GET | `/folders?path=` · `/complete?text=` | navigazione cartelle · autocompletamento |
-| POST | `/plans` `{kind: dedupe\|organize, path, target?}` | crea un piano (anteprima) |
-| POST · DELETE | `/plans/{id}/apply` · `/plans/{id}` | esegue · scarta il piano |
-| GET | `/operations` · `/operations/{id}` | audit delle modifiche |
-| POST | `/operations/{id}/undo` · `/undo` | ripristina un'operazione · l'ultima |
-| POST | `/chat` `{message, session_id?}` | chat (con `pending` quando serve conferma) |
-| GET · POST | `/memory` | memoria |
-| GET | `/export?path=&format=json\|md\|csv` | download report |
+| GET | `/health`, `/status` | server status, AI availability, language |
+| POST | `/scans` `{path, duplicates, classify, index}` | start a scan/indexing in the background → `job` |
+| GET · DELETE | `/scans/{id}` | progress (`phase`, `done`, `total`, `fraction`, `detail`) · cancel |
+| GET | `/commands` | all chat commands, with parameters and endpoint |
+| POST | `/commands/{name}` `{path, target, args, wait}` | run **any command** as a job; complete answer if it finishes within `wait` seconds, otherwise `202` |
+| GET · DELETE | `/jobs` · `/jobs/{id}` | list/status/result (text + structured data) · stop |
+| POST | `/jobs/{id}/confirm` `{confirm}` | answer confirmations (`needs_confirmation`): moves, indexing |
+| GET | `/jobs/events` | Server-Sent Events: real-time progress of all jobs |
+| POST | `/route` `{message}` | plan preview: which commands, in which order |
+| GET | `/search?q=&path=` | hybrid search (with `matched_by`) |
+| POST | `/ask` `{question, path}` | answer from the documents with sources |
+| GET | `/describe?path=` · `/index/stats` | analysis of a file · index status |
+| GET | `/summary?path=` | folder summary |
+| GET | `/files?path=&category=&q=&sort=&limit=&offset=` | paginated file list |
+| GET | `/duplicates?path=` | duplicate groups |
+| GET | `/folders?path=` · `/complete?text=` | folder navigation · autocompletion |
+| POST | `/plans` `{kind: dedupe\|organize, path, target?}` | create a plan (preview) |
+| POST · DELETE | `/plans/{id}/apply` · `/plans/{id}` | apply · discard the plan |
+| GET | `/operations` · `/operations/{id}` | audit of changes |
+| POST | `/operations/{id}/undo` · `/undo` | restore an operation · the last one |
+| POST | `/chat` `{message, session_id?}` | chat (with `pending` when confirmation is needed) |
+| GET · POST | `/memory` | memory |
+| GET | `/export?path=&format=json\|md\|csv` | download a report |
 
-Ogni comando della chat ha la sua API: `POST /commands/largest {"path": "~/Documents", "args": {"n": 10}}`,
-`/commands/search {"args": {"query": "polizza auto"}}`, `/commands/dedupe` (→ `needs_confirmation`,
-poi `POST /jobs/{id}/confirm {"confirm": true}`), ecc. Il campo `result.data` contiene i dati
-strutturati (elenchi di file, gruppi di duplicati, piani, risultati di ricerca…).
+Every chat command has its API: `POST /commands/largest {"path": "~/Documents", "args": {"n": 10}}`,
+`/commands/search {"args": {"query": "car insurance"}}`, `/commands/dedupe` (→ `needs_confirmation`,
+then `POST /jobs/{id}/confirm {"confirm": true}`), etc. `result.data` holds the structured data
+(file lists, duplicate groups, plans, search results…).
 
-Esempio:
+Example:
 
 ```bash
 T=$(cat ~/.folder_intelligence/api_token)
 curl -s -X POST -H "Authorization: Bearer $T" -H 'content-type: application/json' \
-     -d '{"path":"~/Downloads"}' localhost:8765/scans
+     -H 'Accept-Language: en' -d '{"path":"~/Downloads"}' localhost:8765/scans
 ```
 
-## Aggiungere un comando (skill)
+## Adding a command (skill)
 
-Ogni comando è una classe in `src/folder_intelligence/commands/` (un file per comando),
-caricata automaticamente. Puoi metterne anche in `~/.folder_intelligence/commands/`.
+Each command is a class in `src/folder_intelligence/commands/` (one file per command), loaded
+automatically. You can also put them in `~/.folder_intelligence/commands/`.
 
 ```python
 # src/folder_intelligence/commands/free_space.py
 from .. import shell
+from ..i18n import N_, _
 from .base import Command
 
 
 class FreeSpaceCommand(Command):
     name = "free_space"
-    description = "Mostra lo spazio libero sul disco"   # usata anche dall'AI per capire le frasi libere
-    examples = ("quanto spazio libero ho?",)            # mostrati in 'aiuto'
-    keywords = ("spazio libero", "disco pieno")         # oppure patterns = (r"regex",) o un match() custom
-    priority = 30                                       # più basso = valutato prima
+    group = "sistema"                                       # analisi | ricerca | organizzazione | memoria | sistema
+    description = N_("Mostra lo spazio libero sul disco")   # used by the AI router and by 'help' (translated)
+    examples = (N_("quanto spazio libero ho?"),)            # shown in 'help' and given to the router
+    keywords = ("spazio libero", "disco pieno", "free space", "disk full")  # fallback without AI, any language
+    priority = 30                                           # lower = evaluated first
 
     async def run(self, ctx, intent):
-        res = await shell.run(["df", "-h", str(ctx.directory)])   # comandi di sistema: sempre lista, mai shell
-        return res.stdout
+        res = await shell.run(["df", "-h", str(ctx.directory)])   # system commands: always a list, never a shell
+        return _("Spazio sul disco:") + "\n" + res.stdout
 ```
 
-Dentro `run` hai `ctx` con: `ctx.directory`, `await ctx.get_scan()`, `await ctx.get_duplicates(scan)`,
-`ctx.ai` (motore Ollama: `generate_json`, `chat`, `describe_image`, `embed`), `ctx.intelligence`
-(analisi/indice/ricerca), `ctx.memory`, `ctx.pending` (piano da confermare → passa dall'audit),
-`ctx.progress`, `ctx.cancel`. Le frasi non riconosciute vengono mandate all'AI, che sceglie il
-comando in base a `description` ed `examples`.
+Then add the translations of the new texts to `locales/en.json` (the test lists them for you).
 
-Allo stesso modo un nuovo tipo di file si supporta con una classe in `extractors/`
-(sottoclasse di `Extractor` con `extensions` e `async extract(path, ctx)`).
+Inside `run` you have `ctx` with: `ctx.directory`, `await ctx.get_scan()`, `await ctx.get_duplicates(scan)`,
+`ctx.ai` (AI engine facade: `generate_json`, `chat`, `describe_image`, `embed`), `ctx.intelligence`
+(analysis/index/search), `ctx.memory`, `ctx.pending` (plan to confirm → goes through the audit),
+`ctx.progress`, `ctx.cancel`. The AI router learns the command from `description`, `examples`,
+`group` and `params`: nothing else is needed for it to be used in free-form requests.
 
-## Architettura
+In the same way, a new file type is supported with a class in `extractors/` (a subclass of
+`Extractor` with `extensions` and `async extract(path, ctx)`).
+
+## Architecture
 
 ```
 src/folder_intelligence/
-  commands/      un file per comando della chat (plugin) + router (base.py, __init__.py)
-  extractors/    un file per tipo di contenuto (plugin): pdf, image, office, media, docintel…
-  intelligence.py pipeline di comprensione, ricerca ibrida, domande (RAG locale)
-  crypto.py      AES-256-GCM, chiave nel Portachiavi macOS
-  history.py     cronologia comandi cifrata
-  mcp_memory.py  registrazione nella memoria MCP (sealed/summary/off)
-  privacy.py     rimozione dati personali dai testi in uscita
-  index.py       indice SQLite FTS5 + embedding
-  ai.py          motore Ollama: testo, visione, embedding
-  shell.py       comandi di sistema sicuri (mdfind, mdls, ffprobe, tesseract…)
-  threads.py     I/O con timeout in thread daemon (cartelle iCloud/rete)
-  plugins.py     caricamento automatico dei plugin
+  commands/      one file per chat command (plugin) + registry (base.py, __init__.py)
+  engines/       interchangeable AI engines (strategy): llamacpp, ollama, mlx
+  extractors/    one file per content type (plugin): pdf, image, office, media, docintel…
+  locales/       translations (en.json); i18n.py: _(), macOS language/--lang/Accept-Language
+  router.py      from a request to a plan of commands (AI + fallback rules)
+  intelligence.py understanding pipeline, hybrid search, questions (local RAG)
+  similarity.py  similar photos and documents
+  ai.py          AIEngine facade: one engine for text, vision, embeddings
+  crypto.py      AES-256-GCM, key in the macOS Keychain
+  history.py     encrypted command history
+  mcp_memory.py  recording in the MCP memory (sealed/summary/off)
+  privacy.py     removal of personal data from outgoing text
+  index.py       SQLite FTS5 index + embeddings + photo fingerprints
+  shell.py       safe system commands (mdfind, mdls, ffprobe, tesseract…)
+  threads.py     I/O with timeouts in daemon threads (iCloud/network folders)
+  plugins.py     automatic plugin loading
   models.py      FileInfo, DuplicateGroup, ScanResult
-  scanner.py     scansione metadati + duplicati su richiesta
-  classifier.py  RuleClassifier, OllamaClient, FileClassifier
-  organizer.py   piani organize/dedupe, apply, undo (per operazione)
-  audit.py       registro append-only delle modifiche ai file
-  completion.py  autocompletamento cartelle/comandi (CLI e API)
-  api.py         API HTTP FastAPI per l'app Mac
-  memory.py      Strategy: inmemory | json (default) | lightrag (con fallback)
-  exporter.py    report JSON / Markdown / CSV
-  intents.py     normalizzazione frasi ed estrazione percorsi
-  assistant.py   sessione: il `ctx` passato ai comandi
-  cli.py         argparse, chat classica, batch, avvio dell'interfaccia a pannelli
-  tui.py         chat a pannelli con box Attività (prompt_toolkit full-screen)
-  jobs.py        attività in background condivise da chat e API
-  selector.py    selettore sì/no con le frecce (chat classica)
+  scanner.py     metadata scan + on-demand duplicates
+  classifier.py  categories, RuleClassifier, FileClassifier
+  organizer.py   organize/dedupe plans, apply, undo (per operation)
+  audit.py       append-only record of changes to files
+  completion.py  folder/command autocompletion (CLI and API)
+  api.py         FastAPI HTTP API for the Mac app
+  memory.py      Strategy: inmemory | json (default) | lightrag (with fallback)
+  exporter.py    JSON / Markdown / CSV reports
+  intents.py     request normalization and path extraction
+  assistant.py   session: the `ctx` passed to commands
+  cli.py         argparse, classic chat, batch, panel UI start
+  tui.py         panel chat with the Activity box (prompt_toolkit full-screen)
+  jobs.py        background tasks shared by chat and API
+  selector.py    yes/no selector with arrow keys (classic chat)
 tests/           pytest
 ```
 
-Variabili d'ambiente: `FI_OLLAMA_URL`, `FI_OLLAMA_MODEL`, `FI_VISION_MODEL`, `FI_EMBED_MODEL`,
-`FI_DOCINTEL_URL`, `FI_DOCINTEL_TOKEN`, `FI_MCP_MODE`, `FI_MCP_URL`, `FI_MCP_NAMESPACE`, `FI_MASTER_KEY`, `FI_DEBUG`, `FI_HOME` (default `~/.folder_intelligence`), `FI_TRASH`, `FI_API_TOKEN`.
+Environment variables: `FI_LANG`, `FI_ENGINE`, `FI_ROUTER_MODEL`, `FI_OLLAMA_URL`, `FI_OLLAMA_MODEL`,
+`FI_VISION_MODEL`, `FI_EMBED_MODEL`, `FI_DOCINTEL_URL`, `FI_DOCINTEL_TOKEN`, `FI_MCP_MODE`,
+`FI_MCP_URL`, `FI_MCP_NAMESPACE`, `FI_MASTER_KEY`, `FI_DEBUG`, `FI_HOME` (default
+`~/.folder_intelligence`), `FI_TRASH`, `FI_API_TOKEN`.
 
-## Test
+## Tests
 
 ```bash
 .venv/bin/python -m pytest
 ```
 
-## Licenza
+## License
 
-MIT — vedi [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

@@ -7,6 +7,8 @@ timeout per file, saltando i file presenti solo su iCloud.
 
 from __future__ import annotations
 
+from .i18n import _
+
 import ctypes
 import hashlib
 import os
@@ -275,7 +277,7 @@ def scan_directory(
     """Scansiona `root` leggendo solo i metadati. Con `duplicates=True` cerca anche i doppioni."""
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
-        raise NotADirectoryError(f"La cartella {root} non esiste o non è una cartella.")
+        raise NotADirectoryError(_("La cartella {root} non esiste o non è una cartella.", root=root))
 
     files: list[FileInfo] = []
     errors: list[str] = []

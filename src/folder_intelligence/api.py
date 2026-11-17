@@ -31,6 +31,7 @@ from .audit import app_home
 from .classifier import CATEGORIES
 from .commands import registry
 from .intelligence import CloudOnly, DocumentIntelligence
+from .i18n import _, from_accept_language, lang, reset_request_language, use_request_language
 from .intents import Intent
 from .jobs import JobManager
 from .threads import Cancelled, run_blocking
@@ -64,23 +65,23 @@ def get_or_create_token() -> str:
 # ---------------------------------------------------------------------- schemi
 class ScanRequest(BaseModel):
     path: str = Field(..., examples=["~/Downloads"])
-    duplicates: bool = Field(False, description="cerca anche i duplicati (legge i file)")
-    classify: bool = Field(False, description="classifica anche con l'AI (più lento)")
-    index: bool = Field(False, description="analizza il contenuto (OCR, visione, documenti) e indicizza")
+    duplicates: bool = Field(False, description="also find duplicates (reads the files)")
+    classify: bool = Field(False, description="also classify with the AI (slower)")
+    index: bool = Field(False, description="analyze the content (OCR, vision, documents) and index it")
     index_limit: int = Field(200, ge=1, le=100_000)
-    refresh: bool = Field(True, description="ignora la cache e riscansiona")
+    refresh: bool = Field(True, description="ignore the cache and rescan")
 
 
 class PlanRequest(BaseModel):
     kind: Literal["dedupe", "organize"]
     path: str
-    target: str | None = Field(None, description="solo per organize: cartella di destinazione")
+    target: str | None = Field(None, description="organize only: destination folder")
 
 
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
-    directory: str | None = Field(None, description="cartella di lavoro iniziale della sessione")
+    directory: str | None = Field(None, description="initial working folder of the session")
 
 
 class MemoryRequest(BaseModel):
@@ -93,11 +94,12 @@ class AskRequest(BaseModel):
 
 
 class CommandRequest(BaseModel):
-    path: str | None = Field(None, description="cartella su cui agire (default: cartella predefinita)")
-    target: str | None = Field(None, description="destinazione (es. per organize)")
-    args: dict[str, Any] = Field(default_factory=dict, description="argomenti del comando (vedi GET /commands)")
-    wait: float = Field(2.0, ge=0, le=60, description="secondi di attesa: se finisce prima la risposta è completa, "
-                                                      "altrimenti 202 e il job prosegue in background")
+    path: str | None = Field(None, description="folder to act on (default: the default folder)")
+    target: str | None = Field(None, description="destination (e.g. for organize)")
+    args: dict[str, Any] = Field(default_factory=dict, description="command arguments (see GET /commands)")
+    wait: float = Field(2.0, ge=0, le=60, description="seconds to wait: if the command finishes earlier the "
+                                                      "response is complete, otherwise 202 and the job continues "
+                                                      "in the background")
 
 
 class ConfirmRequest(BaseModel):
@@ -168,7 +170,7 @@ class State:
 def resolve_dir(raw: str) -> Path:
     p = Path(raw).expanduser().resolve()
     if not p.is_dir():
-        raise HTTPException(404, f"La cartella {p} non esiste")
+        raise HTTPException(404, _("La cartella {path} non esiste", path=p))
     return p
 
 
@@ -187,7 +189,7 @@ def summary(scan: ScanResult) -> dict[str, Any]:
         "total_human": format_size(scan.total_bytes),
         "duplicate_groups": len(scan.duplicates), "duplicate_files": scan.duplicate_file_count,
         "wasted_bytes": scan.wasted_bytes, "wasted_human": format_size(scan.wasted_bytes),
-        "categories": [{"category": c, "folder": CATEGORIES.get(c, c), "files": len(fs),
+        "categories": [{"category": c, "label": _(c), "folder": _(CATEGORIES.get(c, c)), "files": len(fs),
                         "bytes": sum(f.size_bytes for f in fs)} for c, fs in cats.items()],
         "errors": len(scan.errors),
     }
@@ -213,15 +215,27 @@ def create_app(
     api_token = token or get_or_create_token()
 
     app = FastAPI(title="folderIntelligence API", version=__version__,
-                  description="API locali per organizzare cartelle, trovare duplicati e "
-                              "ripristinare modifiche (audit).")
+                  description="Local API to organize folders, find duplicates, search file contents and "
+                              "undo changes (audit). Send `Accept-Language: it` or `en` (or `?lang=`) to get "
+                              "messages in that language.")
     app.state.fi = state
+
+    @app.middleware("http")
+    async def request_language(request: Request, call_next):
+        """Lingua dei messaggi per questa richiesta: ?lang=… oppure l'header Accept-Language;
+        i job avviati dalla richiesta la ereditano."""
+        code = request.query_params.get("lang") or from_accept_language(request.headers.get("accept-language"))
+        token = use_request_language(code)
+        try:
+            return await call_next(request)
+        finally:
+            reset_request_language(token)
 
     def auth(request: Request) -> None:
         header = request.headers.get("authorization", "")
         given = header[7:] if header.lower().startswith("bearer ") else ""
         if not given or not secrets.compare_digest(given, api_token):
-            raise HTTPException(401, "Token mancante o non valido",
+            raise HTTPException(401, _("Token mancante o non valido"),
                                 headers={"WWW-Authenticate": "Bearer"})
 
     secured = [Depends(auth)]
@@ -229,7 +243,7 @@ def create_app(
     @app.exception_handler(PermissionError)
     async def _perm(_req, exc: PermissionError):
         return JSONResponse(status_code=403, content={
-            "detail": f"Permesso negato: {exc.filename or exc}. Concedi 'Accesso completo al disco'."})
+            "detail": _("Permesso negato: {what}. Concedi 'Accesso completo al disco'.", what=exc.filename or exc)})
 
     async def get_scan(path: str) -> ScanResult:
         root = resolve_dir(path)
@@ -243,7 +257,7 @@ def create_app(
     @app.get("/status", tags=["generale"], dependencies=secured)
     async def status() -> dict[str, Any]:
         ai = bool(state.ollama and await state.ollama.is_available())
-        return {"version": __version__, "ai_available": ai,
+        return {"version": __version__, "ai_available": ai, "language": lang(),
                 "model": state.ollama.model if state.ollama else None,
                 "engines": state.ollama.describe() if state.ollama else None,
                 "default_directory": str(state.default_dir),
@@ -291,14 +305,14 @@ def create_app(
     async def scan_status(job_id: str) -> dict[str, Any]:
         job = state.jobs.get(job_id)
         if not job:
-            raise HTTPException(404, "Scansione non trovata")
+            raise HTTPException(404, _("Scansione non trovata"))
         return job.to_dict()
 
     @app.delete("/scans/{job_id}", tags=["scansione"], dependencies=secured, status_code=202)
     async def cancel_scan(job_id: str) -> dict[str, Any]:
         job = state.jobs.get(job_id)
         if not job:
-            raise HTTPException(404, "Scansione non trovata")
+            raise HTTPException(404, _("Scansione non trovata"))
         job.cancel.set()
         return job.to_dict()
 
@@ -307,7 +321,8 @@ def create_app(
     @app.get("/commands", tags=["comandi"], dependencies=secured)
     async def list_commands() -> dict[str, Any]:
         """Tutti i comandi della chat, ciascuno eseguibile con POST /commands/{name}."""
-        return {"items": [{"name": c.name, "description": c.description, "examples": list(c.examples),
+        return {"items": [{"name": c.name, "description": _(c.description), "examples": [_(e) for e in c.examples],
+                           "group": c.group,
                            "destructive": c.destructive, "params": ["path", *c.params],
                            "endpoint": f"/commands/{c.name}"}
                           for c in registry().commands if not c.hidden and c.name not in INTERNAL]}
@@ -332,7 +347,7 @@ def create_app(
         `needs_confirmation`: conferma con POST /jobs/{id}/confirm."""
         cmd = registry().get(name)
         if cmd is None or cmd.hidden or name in INTERNAL:
-            raise HTTPException(404, f"Comando '{name}' inesistente (vedi GET /commands)")
+            raise HTTPException(404, _("Comando '{name}' inesistente (vedi GET /commands)", name=name))
         root = resolve_dir(req.path) if req.path else state.default_dir
         ctx = state.assistant(root)
         intent = Intent(name, path=root if req.path else None,
@@ -366,14 +381,14 @@ def create_app(
     async def get_job(job_id: str) -> dict[str, Any]:
         job = state.work.get(job_id)
         if job is None:
-            raise HTTPException(404, "Job non trovato")
+            raise HTTPException(404, _("Job non trovato"))
         return job.to_dict()
 
     @app.delete("/jobs/{job_id}", tags=["job"], dependencies=secured, status_code=202)
     async def cancel_job(job_id: str) -> dict[str, Any]:
         job = state.work.cancel(job_id)
         if job is None:
-            raise HTTPException(404, "Job non trovato")
+            raise HTTPException(404, _("Job non trovato"))
         return job.to_dict(with_result=False)
 
     @app.post("/jobs/{job_id}/confirm", tags=["job"], dependencies=secured)
@@ -381,9 +396,9 @@ def create_app(
         """Risponde sì/no alla conferma richiesta da un job; avvia un nuovo job con l'esito."""
         job = state.work.get(job_id)
         if job is None:
-            raise HTTPException(404, "Job non trovato")
+            raise HTTPException(404, _("Job non trovato"))
         if not job.confirmation or job.ctx is None or not job.ctx.pending:
-            raise HTTPException(409, "Questo job non attende conferme")
+            raise HTTPException(409, _("Questo job non attende conferme"))
         job.confirmation = None
         ctx = job.ctx
         answer = Intent("confirm" if req.confirm else "cancel")
@@ -435,7 +450,7 @@ def create_app(
                     continue
                 items.append({"name": e.name, "path": str(Path(e.path))})
         except PermissionError as e:
-            raise HTTPException(403, f"Permesso negato: {root}") from e
+            raise HTTPException(403, _("Permesso negato: {path}", path=root)) from e
         return {"path": str(root), "parent": str(root.parent), "items": items}
 
     @app.get("/complete", tags=["cartelle"], dependencies=secured)
@@ -469,7 +484,7 @@ def create_app(
     @app.get("/plans/{plan_id}", tags=["modifiche"], dependencies=secured)
     async def get_plan(plan_id: str) -> dict[str, Any]:
         if plan_id not in state.plans:
-            raise HTTPException(404, "Piano non trovato o scaduto")
+            raise HTTPException(404, _("Piano non trovato o scaduto"))
         plan, created = state.plans[plan_id]
         return plan_dict(plan_id, plan, created)
 
@@ -481,8 +496,8 @@ def create_app(
     async def apply(plan_id: str) -> dict[str, Any]:
         entry = state.plans.pop(plan_id, None)
         if entry is None:
-            raise HTTPException(404, "Piano non trovato, scaduto o già eseguito")
-        plan, _ = entry
+            raise HTTPException(404, _("Piano non trovato, scaduto o già eseguito"))
+        plan, _created = entry
         async with state.fs_lock:
             result = await run_blocking(organizer.apply_plan, plan, "api")
         for m in result.done:
@@ -501,7 +516,7 @@ def create_app(
     async def get_operation(op_id: str) -> dict[str, Any]:
         op = audit.find_operation(op_id)
         if op is None:
-            raise HTTPException(404, "Operazione non trovata")
+            raise HTTPException(404, _("Operazione non trovata"))
         return op.to_dict(with_moves=True)
 
     async def _undo(ref: str | None) -> dict[str, Any]:
@@ -511,12 +526,12 @@ def create_app(
             else:
                 op = audit.find_operation(ref)
                 if op is None:
-                    raise HTTPException(404, "Operazione non trovata")
+                    raise HTTPException(404, _("Operazione non trovata"))
                 if not op.undoable:
-                    raise HTTPException(409, "Operazione già annullata")
+                    raise HTTPException(409, _("Operazione già annullata"))
                 result = await run_blocking(organizer.undo_operation, op.id, "api")
         if result is None:
-            raise HTTPException(404, "Nessuna operazione da annullare")
+            raise HTTPException(404, _("Nessuna operazione da annullare"))
         for r in result.restored:
             state.intelligence.index.move(r["from"], r["to"])
         state.scans.clear()
@@ -598,7 +613,7 @@ def create_app(
     async def describe(path: str, force: bool = False) -> dict[str, Any]:
         p = Path(path).expanduser().resolve()
         if not p.is_file():
-            raise HTTPException(404, f"File {p} non trovato")
+            raise HTTPException(404, _("File {path} non trovato", path=p))
         try:
             return await state.intelligence.analyze(p, force=force)
         except CloudOnly as e:
@@ -630,9 +645,9 @@ def serve(host: str = "127.0.0.1", port: int = 8765, ai: AIEngine | None = None,
         ai = create_ai()
     app = create_app(ai, ai is not None, create_memory(memory), token=token, use_vision=use_vision)
     if host not in ("127.0.0.1", "localhost", "::1"):
-        print(f"⚠️  Attenzione: API esposte su {host}, raggiungibili da altri dispositivi in rete.")
-    print(f"🤖 folderIntelligence API su http://{host}:{port}  (documentazione: /docs)")
-    print(f"🔑 Token in {token_path()}  →  header 'Authorization: Bearer <token>'")
+        print(_("⚠️  Attenzione: API esposte su {host}, raggiungibili da altri dispositivi in rete.", host=host))
+    print(_("🤖 folderIntelligence API su http://{host}:{port}  (documentazione: /docs)", host=host, port=port))
+    print(_("🔑 Token in {path}  →  header 'Authorization: Bearer <token>'", path=token_path()))
     uvicorn.run(app, host=host, port=port, log_level="info")
     return 0
 

@@ -9,6 +9,8 @@ Regole:
 
 from __future__ import annotations
 
+from .i18n import _
+
 import asyncio
 import json
 import os
@@ -58,7 +60,7 @@ async def run(args: list[str], timeout: float = 60, cwd: str | Path | None = Non
               binary: bool = False) -> ShellResult:
     """Esegue un comando e ne restituisce l'output (testo). Non solleva su exit code != 0."""
     if not args or which(args[0]) is None:
-        return ShellResult(127, "", f"comando non trovato: {args[0] if args else ''}")
+        return ShellResult(127, "", _("comando non trovato: {cmd}", cmd=args[0] if args else ""))
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,

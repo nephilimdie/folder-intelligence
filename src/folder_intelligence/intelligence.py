@@ -28,6 +28,7 @@ from .ai import AIEngine
 from .classifier import CATEGORIES, RuleClassifier
 from .extractors import ExtractContext, Extraction, Extractor, load_extractors
 from .engines.base import TEXT, VISION
+from .i18n import N_, _, language_name
 from .index import Index, query_terms
 from .threads import Cancelled, Timeout
 
@@ -46,21 +47,26 @@ def required_terms(n: int) -> int:
     """Quante parole della ricerca devono comparire nel testo: 1 su 1, 2 su 2-3, metà oltre."""
     return 1 if n <= 1 else 2 if n <= 3 else (n + 1) // 2
 
-EXPAND_SYSTEM = ("Espandi la richiesta di ricerca file dell'utente. Rispondi SOLO JSON: "
-                 '{"keywords": ["6-10 parole chiave in italiano: sinonimi e termini collegati che '
-                 'potrebbero comparire nei documenti cercati"]}')
+def expand_system() -> str:
+    return ("Expand the user's file search request. Answer ONLY with JSON: "
+            '{"keywords": ["6-10 keywords: synonyms and related terms that could appear in the documents '
+            'searched for, in the language of the request, plus their Italian and English equivalents"]}')
 
-SUMMARY_SYSTEM = (
-    "Sei un archivista. Ricevi il contenuto estratto da un file (testo, OCR, descrizione visiva, "
-    "metadati). Rispondi SOLO con JSON valido:\n"
-    '{"category": "<una tra: ' + ", ".join(CATEGORIES) + '>", '
-    '"title": "<titolo breve in italiano>", '
-    '"description": "<1-2 frasi in italiano: cos\'è e di cosa parla>", '
-    '"doc_type": "<tipo generico in 1-2 parole: ricevuta, fattura, contratto, polizza, verbale, lettera, cv, '
-    'estratto conto, foto, screenshot, presentazione, codice, …>", '
-    '"tags": ["<5-10 parole chiave in italiano, minuscole: tipo documento, persone/aziende, luoghi, argomenti, anno>"], '
-    '"date": "<data principale AAAA-MM-GG o null>", "amount": "<importo principale con valuta o null>"}'
-)
+
+def summary_system() -> str:
+    """Istruzioni per capire un file; titolo, descrizione e tag nella lingua dell'utente."""
+    language = language_name()
+    return (
+        "You are an archivist. You receive the content extracted from a file (text, OCR, visual "
+        "description, metadata). Answer ONLY with valid JSON:\n"
+        '{"category": "<one of: ' + ", ".join(CATEGORIES) + '>", '
+        f'"title": "<short title in {language}>", '
+        f'"description": "<1-2 sentences in {language}: what it is and what it is about>", '
+        f'"doc_type": "<generic type in 1-2 words, in {language}: receipt, invoice, contract, policy, '
+        'minutes, letter, cv, bank statement, photo, screenshot, presentation, code, …>", '
+        f'"tags": ["<5-10 lowercase keywords in {language}: document type, people/companies, places, topics, year>"], '
+        '"date": "<main date YYYY-MM-DD or null>", "amount": "<main amount with currency or null>"}'
+    )
 
 
 @dataclass
@@ -126,12 +132,12 @@ class DocumentIntelligence:
         useful_meta = {k: v for k, v in meta.items() if k in (
             "Kind", "WhereFroms", "ContentCreationDate", "Authors", "Title", "NumberOfPages",
             "DurationSeconds", "AcquisitionModel", "Latitude", "Longitude")}
-        prompt = (f"Nome file: {path.name}\nTipo: {meta.get('Kind', path.suffix)}\n"
-                  f"Metadati: {useful_meta}\n\n"
-                  + (f"Descrizione visiva:\n{ex.description[:1500]}\n\n" if ex.description else "")
-                  + (f"Testo estratto:\n{ex.text[:3500]}" if ex.text.strip() else ""))
+        prompt = (f"File name: {path.name}\nType: {meta.get('Kind', path.suffix)}\n"
+                  f"Metadata: {useful_meta}\n\n"
+                  + (f"Visual description:\n{ex.description[:1500]}\n\n" if ex.description else "")
+                  + (f"Extracted text:\n{ex.text[:3500]}" if ex.text.strip() else ""))
         try:
-            data = await self.ai.generate_json(prompt, system=SUMMARY_SYSTEM)
+            data = await self.ai.generate_json(prompt, system=summary_system())
         except Exception:
             return base
         cat = str(data.get("category", "")).lower()
@@ -217,7 +223,7 @@ class DocumentIntelligence:
             if visual:
                 await self.ai.release(TEXT)          # 1) spazio al modello visivo
             if progress:
-                progress("analyze", done, len(todo), f"lettura di {len(batch)} file")
+                progress("analyze", done, len(todo), _("lettura di {n} file", n=len(batch)))
             reads = await asyncio.gather(*(guarded(self._read, p, p) for p in batch))
             if visual:
                 await self.ai.release(VISION)        # 2) spazio al modello di testo
@@ -322,8 +328,8 @@ class DocumentIntelligence:
 
         need = required_terms(len(query_terms(query))) if precise else 1
         fts = self.index.fts(query, root, 50, min_match=need)
-        add([p for p, _, _ in fts], "testo", 1.0)
-        for p, _, snip in fts:
+        add([p for p, _s, _n in fts], N_("testo"), 1.0)
+        for p, _score, snip in fts:
             snippets.setdefault(p, snip)
 
         if self.ai and await self.ai.can_embed() and self.index.stats(root)["with_embedding"]:
@@ -342,13 +348,13 @@ class DocumentIntelligence:
                     # soglia assoluta + relativa al migliore: evita risultati "vagamente simili"
                     floor = SEMANTIC_MIN if precise else SEMANTIC_MIN_LOOSE
                     cut = max(floor, sem[0][1] - SEMANTIC_MARGIN)
-                    add([p for p, sc in sem if sc >= cut], "significato", 1.2)
+                    add([p for p, sc in sem if sc >= cut], N_("significato"), 1.2)
             except Exception:
                 pass
 
         spot_query = " ".join(query_terms(query)) if precise else query
         spot = await shell.mdfind(spot_query, root, 50) if spot_query else []
-        add([str(p) for p in spot if p.is_file()], "spotlight", 0.8)
+        add([str(p) for p in spot if p.is_file()], N_("spotlight"), 0.8)
 
         if names:
             terms = query_terms(query)
@@ -360,7 +366,7 @@ class DocumentIntelligence:
                     return "".join(c for c in s if not unicodedata.combining(c))
 
                 matched = [str(p) for p in names if all(t in norm(p.name) for t in terms)]
-                add(matched[:50], "nome", 1.1)
+                add(matched[:50], N_("nome"), 1.1)
 
         ranked = sorted(scores.items(), key=lambda kv: -kv[1])[:limit]
         return [Hit(p, s, self.index.get(p), snippets.get(p, ""), sources.get(p, [])) for p, s in ranked]
@@ -373,7 +379,7 @@ class DocumentIntelligence:
         words: list[str] = []
         if self.ai and await self.ai.is_available():
             try:
-                data = await self.ai.generate_json(query, system=EXPAND_SYSTEM)
+                data = await self.ai.generate_json(query, system=expand_system())
                 kw = data.get("keywords")
                 words = [str(w) for w in kw][:10] if isinstance(kw, list) else []
             except Exception:
@@ -393,13 +399,14 @@ class DocumentIntelligence:
         for i, h in enumerate(hits[:6], 1):
             d = h.doc or {}
             context.append(f"[{i}] {d.get('name')} — {d.get('description', '')}\n"
-                           f"Metadati: {({k: v for k, v in (d.get('metadata') or {}).items() if k in ('date', 'amount', 'WhereFroms', 'ContentCreationDate')})}\n"
-                           f"Contenuto: {(d.get('text') or '')[:1200]}")
+                           f"Metadata: {({k: v for k, v in (d.get('metadata') or {}).items() if k in ('date', 'amount', 'WhereFroms', 'ContentCreationDate')})}\n"
+                           f"Content: {(d.get('text') or '')[:1200]}")
         messages = [
             {"role": "system", "content": (
-                "Rispondi in italiano usando SOLO i documenti forniti. Cita le fonti come [n]. "
-                "Se i documenti non contengono la risposta dillo chiaramente. Sii conciso.")},
-            {"role": "user", "content": "Documenti:\n\n" + "\n\n".join(context) + f"\n\nDomanda: {question}"},
+                f"Answer in {language_name()} using ONLY the documents provided (they may be in any "
+                "language). Cite sources as [n]. If the documents do not contain the answer, say so "
+                "clearly. Be concise.")},
+            {"role": "user", "content": "Documents:\n\n" + "\n\n".join(context) + f"\n\nQuestion: {question}"},
         ]
         try:
             answer = await self.ai.chat(messages)
@@ -425,4 +432,4 @@ atexit.register(cleanup_temp)
 
 class CloudOnly(Exception):
     def __init__(self, path: Path) -> None:
-        super().__init__(f"{path.name} è solo su iCloud: scaricalo per analizzarlo")
+        super().__init__(_("{name} è solo su iCloud: scaricalo per analizzarlo", name=path.name))

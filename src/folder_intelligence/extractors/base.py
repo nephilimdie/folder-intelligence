@@ -58,9 +58,10 @@ class Extractor(ABC):
     async def extract(self, path: Path, ctx: ExtractContext) -> Extraction | None: ...
 
 
-VISION_PROMPT = (
-    "Descrivi in italiano, in 2-4 frasi, cosa mostra questa immagine: che tipo di immagine è "
-    "(foto, screenshot, documento, scontrino, ricevuta, biglietto, schema…), soggetti, luoghi, "
-    "oggetti e il testo più importante leggibile (date, importi, nomi di aziende). "
-    "Non identificare le persone per nome."
-)
+def vision_prompt() -> str:
+    from ..i18n import language_name
+
+    return (f"Describe in {language_name()}, in 2-4 sentences, what this image shows: what kind of image "
+            "it is (photo, screenshot, document, receipt, ticket, diagram…), subjects, places, objects "
+            "and the most important readable text (dates, amounts, company names). "
+            "Do not identify people by name.")

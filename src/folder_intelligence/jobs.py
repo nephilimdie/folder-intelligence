@@ -15,6 +15,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
+from .i18n import _, is_question, strip_question_marker
+
 RUNNING, DONE, ERROR, CANCELLED = "running", "done", "error", "cancelled"
 KEEP_FINISHED = 50
 FORCE_CANCEL_AFTER = 2.0
@@ -127,11 +129,11 @@ class JobManager:
                     job.confirmation = describe_pending(pending, job.result_text)
             except asyncio.CancelledError:
                 job.status = CANCELLED
-                job.result_text = "⏹️  Interrotto. Nessun file è stato modificato."
+                job.result_text = _("⏹️  Interrotto. Nessun file è stato modificato.")
             except Exception as e:  # noqa: BLE001 - riportato all'utente
                 job.status = ERROR
                 job.error = str(e) or e.__class__.__name__
-                job.result_text = f"❌ Errore: {job.error}"
+                job.result_text = _("❌ Errore: {error}", error=job.error)
             finally:
                 job.finished_at = time.time()
                 self._prune()
@@ -177,10 +179,10 @@ class JobManager:
 def describe_pending(pending: Any, text: str) -> dict[str, Any]:
     """Descrizione serializzabile di una conferma in sospeso."""
     kind = getattr(pending, "kind", "")
-    question = "Confermi?"
+    question = _("Confermi?")
     for line in reversed(text.splitlines()):
-        if "(sì/no)" in line:
-            question = line.replace(" (sì/no)", "").strip()
+        if is_question(line):
+            question = strip_question_marker(line)
             break
     destructive = kind in ("dedupe", "organize")
     return {"kind": kind, "question": question, "destructive": destructive,

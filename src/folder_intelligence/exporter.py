@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 
+from .i18n import _
 from .models import ScanResult, format_size
 
 FORMATS = ("json", "md", "csv")
@@ -36,39 +37,39 @@ def to_markdown(result: ScanResult) -> str:
     lines = [
         f"# Report folderIntelligence — `{result.root}`",
         "",
-        f"_Scansione del {result.scanned_at}_",
+        "_" + _("Scansione del {when}", when=result.scanned_at) + "_",
         "",
-        "## Riepilogo",
+        "## " + _("Riepilogo"),
         "",
-        "| Voce | Valore |",
+        "| " + _("Voce") + " | " + _("Valore") + " |",
         "|---|---|",
-        f"| File analizzati | {len(result.files)} |",
-        f"| Spazio totale | {format_size(result.total_bytes)} |",
-        f"| Gruppi di duplicati | {len(result.duplicates)} |",
-        f"| Copie in eccesso | {result.duplicate_file_count} |",
-        f"| Spazio recuperabile | {format_size(result.wasted_bytes)} |",
+        f"| {_('File analizzati')} | {len(result.files)} |",
+        f"| {_('Spazio totale')} | {format_size(result.total_bytes)} |",
+        f"| {_('Gruppi di duplicati')} | {len(result.duplicates)} |",
+        f"| {_('Copie in eccesso')} | {result.duplicate_file_count} |",
+        f"| {_('Spazio recuperabile')} | {format_size(result.wasted_bytes)} |",
         "",
-        "## Categorie",
+        "## " + _("Categorie"),
         "",
-        "| Categoria | File | Dimensione |",
+        "| " + _("Categoria") + " | " + _("File") + " | " + _("Dimensione") + " |",
         "|---|---:|---:|",
     ]
     for cat, files in result.by_category().items():
-        lines.append(f"| {cat} | {len(files)} | {format_size(sum(f.size_bytes for f in files))} |")
+        lines.append(f"| {_(cat)} | {len(files)} | {format_size(sum(f.size_bytes for f in files))} |")
 
-    lines += ["", "## Duplicati", ""]
+    lines += ["", "## " + _("Duplicati"), ""]
     if not result.duplicates:
-        lines.append("Nessun duplicato trovato.")
+        lines.append(_("Nessun duplicato trovato."))
     for i, g in enumerate(result.duplicates, 1):
         lines.append(f"### {i}. {g.keep.name} — {format_size(g.size_bytes)} × {len(g.files)}")
         lines.append("")
-        lines.append(f"- ✅ tieni: `{g.keep.path}`")
+        lines.append("- ✅ " + _("tieni: {path}", path=f"`{g.keep.path}`"))
         for f in g.extras:
-            lines.append(f"- 🗑️ copia: `{f.path}`")
+            lines.append("- 🗑️ " + _("copia: {path}", path=f"`{f.path}`"))
         lines.append("")
 
     if result.errors:
-        lines += ["## Errori", ""] + [f"- {e}" for e in result.errors]
+        lines += ["## " + _("Errori"), ""] + [f"- {e}" for e in result.errors]
     return "\n".join(lines) + "\n"
 
 
@@ -78,7 +79,7 @@ def export(result: ScanResult, fmt: str, output: Path | None = None) -> Path:
         fmt = "md"
     renderers = {"json": to_json, "md": to_markdown, "csv": to_csv}
     if fmt not in renderers:
-        raise ValueError(f"Formato non supportato: {fmt} (usa {', '.join(FORMATS)})")
+        raise ValueError(_("Formato non supportato: {fmt} (usa {formats})", fmt=fmt, formats=", ".join(FORMATS)))
     if output is None:
         output = Path.cwd() / f"folder-report-{result.root.name or 'root'}.{fmt}"
     output = Path(output).expanduser()

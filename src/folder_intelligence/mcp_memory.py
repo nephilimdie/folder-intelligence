@@ -29,6 +29,7 @@ from typing import Any
 
 from . import crypto
 from .audit import app_home
+from .i18n import _
 from .privacy import redact
 
 MODES = ("off", "sealed", "summary")
@@ -122,7 +123,7 @@ class McpMemory:
         if self.mode == "off" or not docs:
             return result
         if not await self.available():
-            result["error"] = f"memoria MCP non raggiungibile su {self.url}"
+            result["error"] = _("memoria MCP non raggiungibile su {url}", url=self.url)
             return result
 
         when = datetime.now().strftime("%Y-%m-%d")
@@ -132,13 +133,15 @@ class McpMemory:
         years = sorted({str((d.get("metadata") or {}).get("date"))[:4] for d in docs
                         if str((d.get("metadata") or {}).get("date") or "")[:4].isdigit()})
         inventory = (
-            f"[folder-intelligence] Inventario dei contenuti di {_display_root(root)} "
-            f"(analisi del {when}, {len(docs)} file compresi). "
-            f"Categorie: {', '.join(f'{c} {n}' for c, n in cats.most_common())}. "
-            + (f"Tipi di documento: {', '.join(f'{t} {n}' for t, n in types.most_common(15))}. " if types else "")
-            + (f"Periodo: {years[0]}–{years[-1]}. " if years else "")
-            + "I dettagli sono nell'indice cifrato locale di folder-intelligence: "
-              "per cercarli usa la chat o le API di folder-intelligence."
+            "[folder-intelligence] "
+            + _("Inventario dei contenuti di {root} (analisi del {when}, {n} file compresi). ",
+                root=_display_root(root), when=when, n=len(docs))
+            + _("Categorie: {list}. ", list=", ".join(f"{_(c)} {n}" for c, n in cats.most_common()))
+            + (_("Tipi di documento: {list}. ", list=", ".join(f"{t} {n}" for t, n in types.most_common(15)))
+               if types else "")
+            + (_("Periodo: {start}–{end}. ", start=years[0], end=years[-1]) if years else "")
+            + _("I dettagli sono nell'indice cifrato locale di folder-intelligence: "
+                "per cercarli usa la chat o le API di folder-intelligence.")
         )
         if await self._remember(redact(inventory), f"folder:{self.ref(root)}", "project"):
             result["written"] += 1

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+from .i18n import _, language_name
 from .models import FileInfo
 
 DEFAULT_OLLAMA_URL = os.environ.get("FI_OLLAMA_URL", "http://localhost:11434")
@@ -70,16 +71,16 @@ class RuleClassifier:
         ext = path.suffix.lower()
         category = _EXT_TO_CAT.get(ext, "altro")
         name = re.sub(r"[_\-.]+", " ", path.stem.lower())
-        reason = f"estensione {ext or '(nessuna)'}"
+        reason = _("estensione {ext}", ext=ext or _("(nessuna)"))
 
         for target, applies_to, words in NAME_KEYWORDS:
             if category in applies_to and any(w.replace("_", " ") in name for w in words):
                 category = target
-                reason = "nome file"
+                reason = _("nome file")
                 break
 
         confidence = 0.9 if category != "altro" else 0.2
-        return {"category": category, "description": f"Classificato per {reason}",
+        return {"category": category, "description": _("Classificato per {reason}", reason=reason),
                 "confidence": confidence, "source": "rules"}
 
 
@@ -118,11 +119,10 @@ from .engines.base import parse_json  # noqa: E402
 _parse_json = parse_json  # compatibilità
 
 
-_CLASSIFY_SYSTEM = (
-    "Sei un assistente che organizza file su un Mac. Rispondi SOLO con JSON valido nella forma "
-    '{"category": "<una tra: ' + ", ".join(CATEGORIES) + '>", '
-    '"description": "<descrizione breve in italiano, max 15 parole>", "confidence": <0..1>}'
-)
+def _classify_system() -> str:
+    return ("You are an assistant that organizes files on a Mac. Answer ONLY with valid JSON of the form "
+            '{"category": "<one of: ' + ", ".join(CATEGORIES) + '>", '
+            f'"description": "<short description in {language_name()}, max 15 words>", "confidence": <0..1>}}')
 
 
 class FileClassifier:
@@ -149,9 +149,9 @@ class FileClassifier:
         preview = read_text_preview(path)
         if not preview.strip():
             return None
-        prompt = f"Nome file: {path.name}\n\nAnteprima contenuto:\n{preview[:1500]}"
+        prompt = f"File name: {path.name}\n\nContent preview:\n{preview[:1500]}"
         try:
-            data = await self.ollama.generate_json(prompt, system=_CLASSIFY_SYSTEM)  # type: ignore[union-attr]
+            data = await self.ollama.generate_json(prompt, system=_classify_system())  # type: ignore[union-attr]
         except Exception:
             return None
         category = str(data.get("category", "")).strip().lower()

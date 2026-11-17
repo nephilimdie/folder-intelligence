@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .i18n import _
+
 from typing import Sequence, TypeVar
 
 T = TypeVar("T")
@@ -27,14 +29,14 @@ async def select(message: str, options: Sequence[tuple[T, str]], default: int = 
     def render() -> FormattedText:
         parts: list[tuple[str, str]] = [("class:msg", message + "\n")] if message else []
         parts.append(("", "  "))
-        for i, (_, label) in enumerate(options):
+        for i, (_value, label) in enumerate(options):
             if i == state["i"]:
                 parts.append(("class:sel", f" ❯ {label} "))
             else:
                 parts.append(("class:opt", f"   {label} "))
             parts.append(("", " "))
         if not state["done"]:
-            parts.append(("class:hint", "  ←/→ scegli · Invio conferma · Esc annulla"))
+            parts.append(("class:hint", "  " + _("←/→ scegli · Invio conferma · Esc annulla")))
         return FormattedText(parts)
 
     kb = KeyBindings()
@@ -45,36 +47,36 @@ async def select(message: str, options: Sequence[tuple[T, str]], default: int = 
     @kb.add("left")
     @kb.add("up")
     @kb.add("s-tab")
-    def _(event) -> None:
+    def _key1(event) -> None:
         move(-1)
 
     @kb.add("right")
     @kb.add("down")
     @kb.add("tab")
-    def _(event) -> None:
+    def _key2(event) -> None:
         move(1)
 
     @kb.add("enter")
-    def _(event) -> None:
+    def _key3(event) -> None:
         state["done"] = True
         event.app.exit(result=options[state["i"]][0])
 
     @kb.add("escape", eager=True)
     @kb.add("c-c")
     @kb.add("c-d")
-    def _(event) -> None:
+    def _key4(event) -> None:
         state["done"] = True
         event.app.exit(result=None)
 
     # scorciatoie: prima lettera di ogni opzione (s = sì, n = no…)
     shortcuts: dict[str, int] = {}
-    for i, (_, label) in enumerate(options):
+    for i, (_value, label) in enumerate(options):
         key = label.strip()[:1].lower()
         if key.isalpha() and key not in shortcuts:
             shortcuts[key] = i
     for key, idx in shortcuts.items():
         @kb.add(key)
-        def _(event, idx=idx) -> None:
+        def _key5(event, idx=idx) -> None:
             state["i"] = idx
             state["done"] = True
             event.app.exit(result=options[idx][0])

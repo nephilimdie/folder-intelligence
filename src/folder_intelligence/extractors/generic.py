@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..i18n import _
+
 from pathlib import Path
 
 from .. import shell
@@ -17,5 +19,5 @@ class GenericExtractor(Extractor):
 
     async def extract(self, path: Path, ctx: ExtractContext) -> Extraction | None:
         kind = await shell.file_type(path)
-        return Extraction(text=f"Tipo di file: {kind}" if kind else "", metadata={"file_type": kind},
+        return Extraction(text=_("Tipo di file: {kind}", kind=kind) if kind else "", metadata={"file_type": kind},
                           engine=self.name)

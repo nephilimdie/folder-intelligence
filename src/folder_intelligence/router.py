@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .commands.base import PARAM_DOCS
+from .i18n import _, language_name
 from .intents import Intent
 
 if TYPE_CHECKING:
@@ -77,44 +78,48 @@ class Router:
             if c.hidden or c.name in NOT_FOR_AI:
                 continue
             params = ", ".join(f"{p}: {c.param_docs.get(p) or PARAM_DOCS.get(p, p)}" for p in c.params)
-            line = f"  - {c.name}: {c.description}"
+            line = f"  - {c.name}: {_(c.description)}"
             if params:
                 line += f" [args: {params}]"
             if c.destructive:
-                line += " (MODIFICA FILE: chiede conferma)"
+                line += " (MODIFIES FILES: asks for confirmation)"
             if c.examples:
-                line += f' — es. "{c.examples[0]}"'
+                line += f' — e.g. "{_(c.examples[0])}"'
             groups.setdefault(c.group, []).append(line)
         return "\n".join(f"{g}:\n" + "\n".join(lines) for g, lines in groups.items())
 
     def system_prompt(self) -> str:
+        language = language_name()
         return (
-            "Sei il router di un assistente che gestisce i file sul Mac dell'utente. Trasforma la "
-            "richiesta in un piano di comandi da eseguire in ordine. Comandi disponibili:\n"
+            "You are the router of an assistant that manages the files on the user's Mac. Turn the "
+            "request (in any language) into a plan of commands to run in order. Available commands:\n"
             f"{self.catalog()}\n\n"
-            "Regole:\n"
-            f"- usa SOLO i comandi elencati; al massimo {MAX_STEPS} passi; nessun passo inutile: i comandi "
-            "scansionano la cartella da soli, quindi NON aggiungere 'scan' o 'largest' se l'utente non li chiede;\n"
-            "- più passi solo se l'utente chiede più cose, nell'ordine in cui le chiede;\n"
-            "- 'path' è la cartella su cui lavorare come l'ha scritta l'utente (es. ~/Documents, "
-            "Downloads, Scrivania), altrimenti null (= cartella corrente);\n"
-            "- 'args' contiene solo gli argomenti elencati per quel comando, con valori validi; "
-            "se non sai un valore non metterlo;\n"
-            "- i comandi che MODIFICANO FILE solo se l'utente chiede proprio quell'azione;\n"
-            "- se NESSUN comando fa ciò che l'utente chiede, NON scegliere un comando simile: steps = [] e "
-            "in 'reply' spiega in una frase che non puoi farlo e cosa puoi fare invece;\n"
-            "- domande di cultura generale o saluti (non sui file dell'utente): steps = [] e rispondi tu in 'reply';\n"
-            "- quando ci sono passi lascia 'reply' vuoto.\n\n"
-            "Esempi:\n"
-            '"quanto spazio occupano i doppioni in Scaricati e poi fammi un report json" → '
+            "Rules:\n"
+            f"- use ONLY the listed commands; at most {MAX_STEPS} steps; no useless steps: commands scan "
+            "the folder on their own, so do NOT add 'scan' or 'largest' unless the user asks for them;\n"
+            "- several steps only if the user asks for several things, in the order they ask;\n"
+            "- 'path' is the folder to work on as the user wrote it (e.g. ~/Documents, Downloads, "
+            "Desktop, Scrivania), otherwise null (= current folder);\n"
+            "- 'args' contains only the arguments listed for that command, with valid values; if you "
+            "don't know a value, leave it out; text arguments (query, text) stay in the user's language;\n"
+            "- commands that MODIFY FILES only if the user explicitly asks for that action;\n"
+            "- if NO command does what the user asks, do NOT pick a similar command: steps = [] and in "
+            "'reply' explain in one sentence that you can't do it and what you can do instead;\n"
+            "- general-knowledge questions or greetings (not about the user's files): steps = [] and "
+            "answer yourself in 'reply';\n"
+            "- when there are steps, leave 'reply' empty;\n"
+            f"- write 'reply' in {language}.\n\n"
+            "Examples:\n"
+            '"how much space do the duplicates in Downloads take, then give me a json report" → '
             '{"steps": [{"command": "duplicates", "path": "Downloads"}, '
             '{"command": "export", "path": "Downloads", "args": {"format": "json"}}], "reply": ""}\n'
-            '"rinomina tutte le foto con la data" → {"steps": [], "reply": "Non so ancora rinominare i file: '
-            'posso però trovare le foto simili, i duplicati o organizzarle per tipo."}\n'
+            '"quanto spazio occupano i doppioni in Scaricati e poi fammi un report json" → (same plan)\n'
+            '"rename all photos with their date" → {"steps": [], "reply": "<in ' + language + ': I can\'t '
+            'rename files yet, but I can find similar photos, duplicates or organize them by type.>"}\n'
             '"annulla l\'ultima cosa che hai fatto" → {"steps": [{"command": "undo"}], "reply": ""}\n'
-            '"cosa parla il contratto di affitto?" → {"steps": [{"command": "ask", "args": '
+            '"cosa dice il contratto di affitto?" → {"steps": [{"command": "ask", "args": '
             '{"query": "cosa dice il contratto di affitto?"}}], "reply": ""}\n\n'
-            'Rispondi SOLO con JSON: {"steps": [{"command": "...", "path": null, "target": null, '
+            'Answer ONLY with JSON: {"steps": [{"command": "...", "path": null, "target": null, '
             '"args": {}}], "reply": ""}'
         )
 
@@ -139,15 +144,15 @@ class Router:
     def context_lines(ctx: Any) -> str:
         if ctx is None:
             return ""
-        lines = [f"Cartella corrente: {getattr(ctx, 'directory', '')}"]
+        lines = [f"Current folder: {getattr(ctx, 'directory', '')}"]
         try:
             indexed = ctx.intelligence.index.stats(ctx.directory)["documents"]
-            lines.append(f"Documenti già indicizzati nella cartella corrente: {indexed}")
+            lines.append(f"Documents already indexed in the current folder: {indexed}")
         except Exception:
             pass
         recent = [m for m in getattr(ctx, "history", [])[-4:] if m.get("role") == "user"]
         if recent:
-            lines.append("Richieste precedenti: " + " | ".join(m["content"][:120] for m in recent))
+            lines.append("Previous requests: " + " | ".join(m["content"][:120] for m in recent))
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ route
@@ -171,7 +176,7 @@ class Router:
             data = await asyncio.wait_for(self._ask_ai(text, ctx), ROUTER_TIMEOUT)
         except Exception as e:  # noqa: BLE001 - qualsiasi problema → regole
             plan = RoutePlan([rules], "rules")
-            plan.notes.append(f"router AI non disponibile ({e.__class__.__name__}): uso le regole")
+            plan.notes.append(_("router AI non disponibile ({error}): uso le regole", error=e.__class__.__name__))
             return done(plan)
         plan = self.validate(data, rules)
         return done(plan)
@@ -183,7 +188,7 @@ class Router:
             return False
 
     async def _ask_ai(self, text: str, ctx: Any) -> dict[str, Any]:
-        prompt = (self.context_lines(ctx) + "\n\nRichiesta: " + text).strip()
+        prompt = (self.context_lines(ctx) + "\n\nRequest: " + text).strip()
         return await self.ai.generate_json(prompt, system=self.system_prompt(), schema=self.schema(),
                                            model=self.model)
 
@@ -199,7 +204,7 @@ class Router:
             name = str(raw.get("command") or "")
             cmd = self.registry.get(name)
             if cmd is None or name in NOT_FOR_AI:
-                notes.append(f"comando sconosciuto ignorato: {name or '?'}")
+                notes.append(_("comando sconosciuto ignorato: {name}", name=name or "?"))
                 continue
             args_in = raw.get("args") if isinstance(raw.get("args"), dict) else {}
             args = {k: v for k, v in args_in.items() if k in cmd.params and v not in (None, "", "null")}
@@ -226,7 +231,7 @@ class Router:
         # al massimo un comando che modifica file, e per ultimo
         destructive = [s for s in steps if self.registry.get(s.type).destructive]
         if len(destructive) > 1:
-            notes.append("più operazioni sui file nella stessa richiesta: eseguo solo la prima")
+            notes.append(_("più operazioni sui file nella stessa richiesta: eseguo solo la prima"))
             steps = [s for s in steps if s not in destructive[1:]]
             destructive = destructive[:1]
         if destructive and steps[-1] is not destructive[0]:
@@ -244,7 +249,7 @@ class Router:
         if not steps:
             if reply:
                 return RoutePlan([], "ai", reply=reply, notes=notes)
-            return RoutePlan([rules], "rules", notes=notes + ["l'AI non ha proposto comandi: uso le regole"])
+            return RoutePlan([rules], "rules", notes=notes + [_("l'AI non ha proposto comandi: uso le regole")])
         return RoutePlan(steps, "ai", reply=reply, notes=notes)
 
     @staticmethod
@@ -282,13 +287,13 @@ def clean_args(args: dict[str, Any], notes: list[str]) -> dict[str, Any]:
         if k in _ENUMS:
             v = str(v).lower().strip()
             if v not in _ENUMS[k]:
-                notes.append(f"argomento ignorato: {k}={v}")
+                notes.append(_("argomento ignorato: {arg}", arg=f"{k}={v}"))
                 continue
         elif k in ("n", "limit"):
             try:
                 v = max(1, int(v))
             except (TypeError, ValueError):
-                notes.append(f"argomento ignorato: {k}={v}")
+                notes.append(_("argomento ignorato: {arg}", arg=f"{k}={v}"))
                 continue
         elif k == "ref":
             v = str(v).strip()
@@ -302,7 +307,7 @@ def clean_args(args: dict[str, Any], notes: list[str]) -> dict[str, Any]:
 
 def describe_step(step: Intent, registry: "CommandRegistry") -> str:
     cmd = registry.get(step.type)
-    label = cmd.description.split("(")[0].strip() if cmd else step.type
+    label = _(cmd.description).split("(")[0].strip() if cmd else step.type
     extra = []
     if step.path:
         extra.append(str(step.path).replace(str(Path.home()), "~"))

@@ -1,3 +1,4 @@
+from ..i18n import N_, _
 from ..intents import NO, Intent
 from .base import Command, Request
 
@@ -5,7 +6,7 @@ from .base import Command, Request
 class CancelCommand(Command):
     name = "cancel"
     group = "sistema"
-    description = "Annulla l'operazione in attesa di conferma"
+    description = N_("Annulla l'operazione in attesa di conferma")
     priority = 13
     hidden = True
 
@@ -17,6 +18,6 @@ class CancelCommand(Command):
             what = getattr(ctx.pending, "kind", "")
             ctx.pending = None
             if what == "index":
-                return "Ok, non leggo i file. Quando vuoi: 'indicizza la cartella'."
-            return "Ok, operazione annullata. Non ho toccato nessun file."
-        return "Nessuna operazione in attesa. (Per ripristinare l'ultima eseguita: 'annulla l'ultima operazione'.)"
+                return _("Ok, non leggo i file. Quando vuoi: 'indicizza la cartella'.")
+            return _("Ok, operazione annullata. Non ho toccato nessun file.")
+        return _("Nessuna operazione in attesa. (Per ripristinare l'ultima eseguita: 'annulla l'ultima operazione'.)")

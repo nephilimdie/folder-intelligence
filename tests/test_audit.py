@@ -37,8 +37,8 @@ def test_undo_specific_operation_not_only_last(sample_dir):
     assert len(u.restored) == 2
     assert (sample_dir / "foto copia.jpg").exists()
     ops = {o.id: o for o in audit.operations()}
-    assert ops[first.operation_id].status == "annullata"
-    assert ops[second.operation_id].status == "eseguita"
+    assert ops[first.operation_id].status == "undone"
+    assert ops[second.operation_id].status == "done"
     # undo_last ora prende la seconda (l'unica ancora annullabile)
     assert organizer.undo_last().operation_id == second.operation_id
     assert organizer.undo_last() is None
@@ -64,11 +64,11 @@ def test_partial_undo_then_complete(sample_dir, tmp_path):
     shutil.move(gone, hidden)
     u = organizer.undo_operation(1)
     assert len(u.restored) == 1 and len(u.failed) == 1
-    assert audit.find_operation(1).status == "annullata in parte"
+    assert audit.find_operation(1).status == "partially_undone"
     shutil.move(hidden, gone)
     u2 = organizer.undo_operation(1)
     assert len(u2.restored) == 1
-    assert audit.find_operation(1).status == "annullata"
+    assert audit.find_operation(1).status == "undone"
 
 
 def test_corrupted_line_is_skipped(sample_dir):

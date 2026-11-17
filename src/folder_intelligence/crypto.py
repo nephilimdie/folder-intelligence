@@ -14,6 +14,8 @@ sync accidentali e strumenti che leggono i file dell'app.
 
 from __future__ import annotations
 
+from .i18n import _
+
 import base64
 import os
 import secrets
@@ -80,7 +82,7 @@ def master_key() -> bytes:
     else:
         key = _from_keyring() or _from_file()
     if len(key) != 32:
-        raise CryptoError("Chiave master non valida (servono 32 byte)")
+        raise CryptoError(_("Chiave master non valida (servono 32 byte)"))
     return key
 
 
@@ -89,7 +91,7 @@ def key_location() -> str:
         return "variabile FI_MASTER_KEY"
     if (_home() / "master.key").exists():
         return str(_home() / "master.key")
-    return f"Portachiavi macOS (servizio '{SERVICE}')"
+    return _("Portachiavi macOS (servizio '{service}')", service=SERVICE)
 
 
 def encrypt_bytes(data: bytes, purpose: str) -> bytes:
@@ -99,12 +101,12 @@ def encrypt_bytes(data: bytes, purpose: str) -> bytes:
 
 def decrypt_bytes(blob: bytes, purpose: str) -> bytes:
     if not blob.startswith(MAGIC):
-        raise CryptoError("Formato non cifrato o sconosciuto")
+        raise CryptoError(_("Formato non cifrato o sconosciuto"))
     nonce, ct = blob[len(MAGIC):len(MAGIC) + 12], blob[len(MAGIC) + 12:]
     try:
         return AESGCM(master_key()).decrypt(nonce, ct, purpose.encode())
     except Exception as e:  # InvalidTag
-        raise CryptoError("Impossibile decifrare: chiave errata o dati manomessi") from e
+        raise CryptoError(_("Impossibile decifrare: chiave errata o dati manomessi")) from e
 
 
 def is_encrypted_bytes(blob: bytes) -> bool:

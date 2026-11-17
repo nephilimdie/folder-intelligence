@@ -7,8 +7,11 @@ from pathlib import Path
 from .. import shell
 from .base import ExtractContext, Extraction, Extractor
 
-FRAME_PROMPT = ("Questo è un fotogramma di un video. Descrivi in italiano in 1-2 frasi la scena: "
-                "luogo, soggetti, attività. Non identificare le persone per nome.")
+def frame_prompt() -> str:
+    from ..i18n import language_name
+
+    return (f"This is a frame from a video. Describe the scene in {language_name()} in 1-2 sentences: "
+            "place, subjects, activity. Do not identify people by name.")
 
 
 class MediaExtractor(Extractor):
@@ -51,7 +54,7 @@ class MediaExtractor(Extractor):
                              "-frames:v", "1", "-vf", "scale=1024:-2", str(frame)], timeout=60)
             if frame.exists():
                 try:
-                    description = await ctx.ai.describe_image(frame, FRAME_PROMPT)  # type: ignore[union-attr]
+                    description = await ctx.ai.describe_image(frame, frame_prompt())  # type: ignore[union-attr]
                     engine += "+vision"
                 except Exception:
                     pass

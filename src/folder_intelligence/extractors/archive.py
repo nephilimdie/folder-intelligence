@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..i18n import _
+
 import tarfile
 import zipfile
 from pathlib import Path
@@ -31,6 +33,6 @@ class ArchiveExtractor(Extractor):
         if not names:
             return None
         shown = names[:MAX_ENTRIES]
-        more = f"\n… e altri {len(names) - MAX_ENTRIES} file" if len(names) > MAX_ENTRIES else ""
-        return Extraction(text="Contenuto dell'archivio:\n" + "\n".join(shown) + more,
+        more = "\n" + _("… e altri {n} file", n=len(names) - MAX_ENTRIES) if len(names) > MAX_ENTRIES else ""
+        return Extraction(text=_("Contenuto dell'archivio:") + "\n" + "\n".join(shown) + more,
                           metadata={"entries": len(names)}, engine=self.name)

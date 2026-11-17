@@ -11,6 +11,8 @@ Per completarlo: implementare `generate_json`/`chat` con `mlx_lm.load` + `mlx_lm
 
 from __future__ import annotations
 
+from ..i18n import _
+
 from .base import TEXT, EngineStrategy
 
 
@@ -22,4 +24,4 @@ class MlxEngine(EngineStrategy):
         return False
 
     def why_unavailable(self, capability: str = TEXT) -> str:
-        return "il motore MLX non è ancora implementato: usa --engine llamacpp oppure ollama"
+        return _("il motore MLX non è ancora implementato: usa --engine llamacpp oppure ollama")

@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from .. import shell
-from .base import VISION_PROMPT, ExtractContext, Extraction, Extractor
+from .base import ExtractContext, Extraction, Extractor, vision_prompt
 
 OCR_PAGES = 3
 
@@ -43,7 +43,7 @@ class PdfExtractor(Extractor):
                 engine = "pdf+ocr"
             if pages and await ctx.vision_ok():
                 try:
-                    description = await ctx.ai.describe_image(pages[0], VISION_PROMPT)  # type: ignore[union-attr]
+                    description = await ctx.ai.describe_image(pages[0], vision_prompt())  # type: ignore[union-attr]
                     engine += "+vision"
                 except Exception:
                     pass

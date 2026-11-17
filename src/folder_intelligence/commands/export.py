@@ -1,4 +1,5 @@
 from .. import exporter
+from ..i18n import N_, _
 from ..intents import Intent
 from .base import Command, CommandResult, Request
 
@@ -6,9 +7,10 @@ from .base import Command, CommandResult, Request
 class ExportCommand(Command):
     name = "export"
     group = "analisi"
-    description = "Salva un report della cartella (md, json, csv)"
-    examples = ("esporta il report in csv",)
-    keywords = ("esporta", "export", "salva report", "salva il report", "report")
+    description = N_("Salva un report della cartella (md, json, csv)")
+    examples = (N_("esporta il report in csv"),)
+    keywords = ("esporta", "export", "salva report", "salva il report", "report", "save report",
+                "save the report")
     priority = 24
     params = ("format",)
 
@@ -24,4 +26,4 @@ class ExportCommand(Command):
         await ctx.ensure_classified(scan)
         out = intent.path if intent.path and intent.path.suffix else None
         path = await ctx.blocking(exporter.export, scan, intent.args.get("format", "md"), out)
-        return CommandResult(f"📄 Report salvato in {path}", {"path": str(path)})
+        return CommandResult(_("📄 Report salvato in {path}", path=path), {"path": str(path)})

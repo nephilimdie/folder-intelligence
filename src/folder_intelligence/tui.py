@@ -31,6 +31,7 @@ from prompt_toolkit.widgets import Frame, TextArea
 
 from . import completion
 from . import history as enc_history
+from .i18n import N_, _, is_question
 from .jobs import CANCELLED, DONE, ERROR, Job, JobManager
 
 if TYPE_CHECKING:
@@ -41,10 +42,10 @@ PANEL_WIDTH = 42
 WIDE_MIN_COLUMNS = 100
 MAX_LINES = 4000
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-PHASES = {"scan": "🔍 file", "hash": "🧬 confronto", "hash_full": "🧬 verifica",
-          "classify": "🤖 classifico", "analyze": "🧠 lettura",
-          "fingerprint": "🖼️ impronte", "compare": "🔗 confronto"}
-EXIT_WORDS = {"esci", "exit", "quit", "q", "basta", "chiudi"}
+PHASES = {"scan": N_("🔍 file"), "hash": N_("🧬 confronto"), "hash_full": N_("🧬 verifica"),
+          "classify": N_("🤖 classifico"), "analyze": N_("🧠 lettura"),
+          "fingerprint": N_("🖼️ impronte"), "compare": N_("🔗 confronto")}
+EXIT_WORDS = {"esci", "exit", "quit", "q", "basta", "chiudi", "bye", "close"}
 
 STYLE = Style.from_dict({
     "you": "bold",
@@ -122,7 +123,7 @@ class ChatTUI:
 
         # ------------------------------------------------------------- input
         self.input = TextArea(
-            height=1, prompt="Tu › ", multiline=False, wrap_lines=False,
+            height=1, prompt=_("Tu › "), multiline=False, wrap_lines=False,
             completer=completion.prompt_toolkit_completer(lambda: self.assistant.directory),
             complete_while_typing=False, auto_suggest=AutoSuggestFromHistory(),
             history=enc_history.prompt_toolkit_history(), accept_handler=self._on_accept,
@@ -143,31 +144,31 @@ class ChatTUI:
         @confirm_kb.add("left")
         @confirm_kb.add("up")
         @confirm_kb.add("s-tab")
-        def _(e) -> None:
+        def _key1(e) -> None:
             c = self.confirms[0]
             c.selected = (c.selected - 1) % len(c.options)
 
         @confirm_kb.add("right")
         @confirm_kb.add("down")
         @confirm_kb.add("tab")
-        def _(e) -> None:
+        def _key2(e) -> None:
             c = self.confirms[0]
             c.selected = (c.selected + 1) % len(c.options)
 
         @confirm_kb.add("enter")
-        def _(e) -> None:
+        def _key3(e) -> None:
             c = self.confirms[0]
             self._answer(c.options[c.selected][0])
 
         @confirm_kb.add("escape", eager=True)
         @confirm_kb.add("c-c")
-        def _(e) -> None:
+        def _key4(e) -> None:
             self._answer(None)
 
         @confirm_kb.add("<any>")
-        def _(e) -> None:
+        def _key5(e) -> None:
             key = e.data.lower()
-            for i, (_, label) in enumerate(self.confirms[0].options):
+            for i, (_value, label) in enumerate(self.confirms[0].options):
                 if label.strip()[:1].lower() == key:
                     self.confirms[0].selected = i
                     self._answer(self.confirms[0].options[i][0])
@@ -180,7 +181,7 @@ class ChatTUI:
 
         # ------------------------------------------------------------ pannello
         self.panel = Frame(Window(FormattedTextControl(self._render_jobs), wrap_lines=True),
-                           title=lambda: f"Attività ({len(self.jobs.active())})", width=D(preferred=PANEL_WIDTH))
+                           title=lambda: _("Attività ({n})", n=len(self.jobs.active())), width=D(preferred=PANEL_WIDTH))
 
         left = HSplit([
             self.output,
@@ -199,7 +200,7 @@ class ChatTUI:
             show = Condition(lambda: bool(self.jobs.active()))
             return HSplit([left, ConditionalContainer(
                 Frame(Window(FormattedTextControl(self._render_jobs), height=D(max=6), wrap_lines=True),
-                      title=lambda: f"Attività ({len(self.jobs.active())})"), filter=show)])
+                      title=lambda: _("Attività ({n})", n=len(self.jobs.active()))), filter=show)])
 
         root = FloatContainer(
             content=HSplit([DynamicContainer(body),
@@ -210,33 +211,33 @@ class ChatTUI:
         kb = KeyBindings()
 
         @kb.add("c-c", filter=~has_confirm)
-        def _(e) -> None:
+        def _key6(e) -> None:
             self._ctrl_c()
 
         @kb.add("c-d", filter=has_focus(self.input) & ~has_confirm)
-        def _(e) -> None:
+        def _key7(e) -> None:
             if not self.input.text:
                 self._request_exit()
 
         @kb.add("pageup")
-        def _(e) -> None:
+        def _key8(e) -> None:
             self.scroll_by(self._page())
 
         @kb.add("pagedown")
-        def _(e) -> None:
+        def _key9(e) -> None:
             self.scroll_by(-self._page())
 
         @kb.add("s-up")
-        def _(e) -> None:
+        def _key10(e) -> None:
             self.scroll_by(1)
 
         @kb.add("s-down")
-        def _(e) -> None:
+        def _key11(e) -> None:
             self.scroll_by(-1)
 
         @kb.add("escape", filter=scrolled & ~has_confirm, eager=True)
         @kb.add("end", filter=scrolled & ~has_confirm & Condition(lambda: not self.input.text))
-        def _(e) -> None:
+        def _key12(e) -> None:
             self.scroll_to_bottom()
 
         self.app: Application = Application(
@@ -273,9 +274,9 @@ class ChatTUI:
         return max(3, (info.window_height if info else 20) - 2)
 
     def _render_scroll_hint(self) -> FormattedText:
-        news = "  ● nuovi messaggi" if self.unread else ""
-        return FormattedText([("class:warn", f" ▼ {self.scroll} righe più sotto{news} — "
-                                             "rotella/PagGiù per scendere, Esc o Fine per tornare in fondo")])
+        news = "  " + _("● nuovi messaggi") if self.unread else ""
+        return FormattedText([("class:warn", " " + _("▼ {n} righe più sotto{news} — rotella/PagGiù per scendere, "
+                                                     "Esc o Fine per tornare in fondo", n=self.scroll, news=news))])
 
     def _line_count(self) -> int:
         return len(self.lines)
@@ -313,13 +314,13 @@ class ChatTUI:
         recent = [j for j in self.jobs.list() if not j.active][:4]
         out: list[tuple[str, str]] = []
         if not active and not recent:
-            return FormattedText([("class:info", "Nessuna attività.\n\nLe operazioni lunghe\n"
-                                                "continuano qui mentre\nusi la chat.")])
+            return FormattedText([("class:info", _("Nessuna attività.\n\nLe operazioni lunghe\n"
+                                                  "continuano qui mentre\nusi la chat."))])
         for j in active:
             spin = SPINNER[self.tick % len(SPINNER)]
             title = j.title if len(j.title) <= width + 8 else j.title[: width + 7] + "…"
             out += [("class:jobhead", f"#{j.id} {spin} {title}\n")]
-            phase = PHASES.get(j.phase, j.phase) or (j.message[:width + 8] if j.message else "avvio…")
+            phase = _(PHASES.get(j.phase, j.phase)) or (j.message[:width + 8] if j.message else _("avvio…"))
             count = f" {j.done}/{j.total}" if j.total else (f" {j.done}" if j.done else "")
             out += [("", f"   {phase}{count}\n   ")] + _bar(j.fraction, width) + [("class:info", f" {_fmt_secs(j.elapsed)}\n")]
             if j.detail:
@@ -327,7 +328,7 @@ class ChatTUI:
                 out += [("class:info", f"   {d[: width + 6]}\n")]
             out += [("", "\n")]
         if recent:
-            out += [("class:info", "Recenti\n")]
+            out += [("class:info", _("Recenti") + "\n")]
             for j in recent:
                 icon = {DONE: "✅", ERROR: "❌", CANCELLED: "⏹️ "}.get(j.status, "•")
                 if j.confirmation:
@@ -335,14 +336,15 @@ class ChatTUI:
                 title = j.title if len(j.title) <= width + 4 else j.title[: width + 3] + "…"
                 out += [("", f"#{j.id} {icon} {title}"), ("class:info", f" {_fmt_secs(j.elapsed)}\n")]
         if active:
-            out += [("class:info", f"\n'ferma {active[-1].id}' interrompe #{active[-1].id}")]
+            out += [("class:info", "\n" + _("'ferma {id}' interrompe #{id}", id=active[-1].id))]
         return FormattedText(out)
 
     def _render_status(self) -> FormattedText:
         n = len(self.jobs.active())
-        jobs = f" ⏳ {n} in corso " if n else ""
+        jobs = " " + _("⏳ {n} in corso", n=n) + " " if n else ""
         return FormattedText([("class:status", f" 📁 {self.assistant.directory}  {jobs}"),
-                              ("class:status", "  Tab completa · ↑/↓ storico · rotella/PagSu scorre · Ctrl+C ferma · Ctrl+D esce ")])
+                              ("class:status", "  " + _("Tab completa · ↑/↓ storico · rotella/PagSu scorre · "
+                                                       "Ctrl+C ferma · Ctrl+D esce") + " ")])
 
     def _on_jobs_changed(self) -> None:
         self._invalidate()
@@ -361,12 +363,12 @@ class ChatTUI:
         c = self.confirms[0]
         prefix = f"#{c.job.id} · " if c.job else ""
         out: list[tuple[str, str]] = [("class:question", f"{prefix}{c.question}\n  ")]
-        for i, (_, label) in enumerate(c.options):
+        for i, (_value, label) in enumerate(c.options):
             out.append(("class:sel" if i == c.selected else "", f" {'❯' if i == c.selected else ' '} {label} "))
             out.append(("", "  "))
-        out.append(("class:hint", "←/→ scegli · Invio conferma · Esc annulla"))
+        out.append(("class:hint", _("←/→ scegli · Invio conferma · Esc annulla")))
         if len(self.confirms) > 1:
-            out.append(("class:hint", f"   (+{len(self.confirms) - 1} in attesa)"))
+            out.append(("class:hint", "   " + _("(+{n} in attesa)", n=len(self.confirms) - 1)))
         return FormattedText(out)
 
     def ask(self, question: str, options: list[tuple[Any, str]], default: int, on_answer, job: Job | None = None) -> None:
@@ -377,7 +379,7 @@ class ChatTUI:
 
     def _answer(self, value: Any) -> None:
         c = self.confirms.popleft()
-        label = next((lbl for v, lbl in c.options if v == value), "No")
+        label = next((lbl for v, lbl in c.options if v == value), _("No"))
         self.write(f"   → {label}", "info")
         if self.confirms:
             self.app.layout.focus(self.confirm_window)
@@ -389,20 +391,16 @@ class ChatTUI:
     def _confirm_job(self, job: Job) -> None:
         """Il comando di `job` chiede conferma: selettore, poi 'sì'/'no' sulla stessa sessione."""
         info = job.confirmation or {}
-        if info.get("kind") == "index":
-            options = [(True, "Sì, leggi i file"), (False, "No, non ora")]
-        elif info.get("destructive"):
-            verb = "sposta nel Cestino" if info.get("kind") == "dedupe" else "organizza"
-            options = [(True, f"Sì, {verb}"), (False, "No, annulla")]
-        else:
-            options = [(True, "Sì, procedi"), (False, "No")]
+        from .cli import confirmation_options
+
+        options = confirmation_options(info.get("kind", ""))
         default = 1 if info.get("destructive") else 0
 
         def answered(value: Any) -> None:
             job.confirmation = None
-            self.run_text("sì" if value else "no", ctx=job.ctx, title=f"conferma #{job.id}", echo=False)
+            self.run_text("sì" if value else "no", ctx=job.ctx, title=_("conferma #{id}", id=job.id), echo=False)
 
-        self.ask(info.get("question") or "Confermi?", options, default, answered, job)
+        self.ask(info.get("question") or _("Confermi?"), options, default, answered, job)
 
     # ================================================================ comandi
     def _on_accept(self, buff) -> bool:
@@ -422,20 +420,21 @@ class ChatTUI:
         import re
 
         low = text.lower().strip()
-        m = re.match(r"^(?:ferma|stop|interrompi|annulla attivit[aà]|kill)\s*#?(\d+)$", low)
+        m = re.match(r"^(?:ferma|stop|interrompi|annulla attivit[aà]|kill|cancel job)\s*#?(\d+)$", low)
         if m:
-            self.write(f"Tu › {text}", "you")
+            self.write(_("Tu › ") + text, "you")
             job = self.jobs.cancel(m.group(1))
-            self.write(f"⏹️  Interrompo #{m.group(1)}…" if job and job.active else
-                       f"Nessuna attività in corso con numero {m.group(1)}.", "warn")
+            self.write(_("⏹️  Interrompo #{id}…", id=m.group(1)) if job and job.active else
+                       _("Nessuna attività in corso con numero {id}.", id=m.group(1)), "warn")
             return True
-        if low in ("attivita", "attività", "jobs", "job", "processi", "cosa stai facendo"):
-            self.write(f"Tu › {text}", "you")
+        if low in ("attivita", "attività", "jobs", "job", "processi", "cosa stai facendo", "tasks", "activity",
+                   "what are you doing"):
+            self.write(_("Tu › ") + text, "you")
             act = self.jobs.active()
             if not act:
-                self.write("Nessuna attività in corso.", "reply")
+                self.write(_("Nessuna attività in corso."), "reply")
             for j in act:
-                self.write(f"#{j.id} {j.title} — {PHASES.get(j.phase, j.phase)} {j.done}/{j.total or '?'} "
+                self.write(f"#{j.id} {j.title} — {_(PHASES.get(j.phase, j.phase))} {j.done}/{j.total or '?'} "
                            f"({_fmt_secs(j.elapsed)})", "reply")
             return True
         return False
@@ -445,7 +444,7 @@ class ChatTUI:
         if echo:
             self.scroll_to_bottom()
             self.write("")
-            self.write(f"Tu › {text}", "you")
+            self.write(_("Tu › ") + text, "you")
         base = ctx or self.assistant
         holder: dict[str, Job] = {}
 
@@ -469,10 +468,11 @@ class ChatTUI:
         holder["job"] = job
 
         async def watch() -> None:
-            done, _ = await asyncio.wait({job.task}, timeout=FOREGROUND_SECONDS)  # type: ignore[arg-type]
+            done, _pending = await asyncio.wait({job.task}, timeout=FOREGROUND_SECONDS)  # type: ignore[arg-type]
             if not done:
                 job.background = True
-                self.write(f"⏳ #{job.id} continua in background (box Attività): puoi continuare a scrivere.", "info")
+                self.write(_("⏳ #{id} continua in background (box Attività): puoi continuare a scrivere.",
+                             id=job.id), "info")
                 await job.task  # type: ignore[misc]
             self._show_result(job)
 
@@ -492,11 +492,11 @@ class ChatTUI:
         if job.confirmation:
             # la domanda finale la mostra il selettore
             lines = text.rstrip().splitlines()
-            text = "\n".join(line for line in lines if "(sì/no)" not in line).rstrip()
+            text = "\n".join(line for line in lines if not is_question(line)).rstrip()
         self.write(text, style)
         if job.confirmation:
             self._confirm_job(job)
-        if text.startswith("A presto"):
+        if job.result_data.get("command") == "exit":
             self._exit()
 
     # ================================================================ uscita
@@ -508,14 +508,14 @@ class ChatTUI:
         if active:
             j = active[0]
             self.jobs.cancel(j.id)
-            self.write(f"⏹️  Interrompo #{j.id} ({j.title})…", "warn")
+            self.write(_("⏹️  Interrompo #{id} ({title})…", id=j.id, title=j.title), "warn")
             return
         now = time.monotonic()
         if now - self.last_ctrl_c < 1.5:
             self._exit()
         else:
             self.last_ctrl_c = now
-            self.write("Premi di nuovo Ctrl+C (o Ctrl+D / 'esci') per uscire.", "info")
+            self.write(_("Premi di nuovo Ctrl+C (o Ctrl+D / 'esci') per uscire."), "info")
 
     def _request_exit(self) -> None:
         active = self.jobs.active()
@@ -528,8 +528,8 @@ class ChatTUI:
                 self.jobs.cancel_all()
                 self._exit()
 
-        self.ask(f"Ci sono {len(active)} attività in corso. Uscire comunque (verranno interrotte)?",
-                 [(True, "Sì, esci"), (False, "No, resta")], 1, answered)
+        self.ask(_("Ci sono {n} attività in corso. Uscire comunque (verranno interrotte)?", n=len(active)),
+                 [(True, _("Sì, esci")), (False, _("No, resta"))], 1, answered)
 
     def _exit(self) -> None:
         if self.app.is_running:

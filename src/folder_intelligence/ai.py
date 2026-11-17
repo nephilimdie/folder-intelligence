@@ -14,6 +14,8 @@ sa quale motore c'è sotto: cambiare motore = cambiare configurazione (`--engine
 
 from __future__ import annotations
 
+from .i18n import _
+
 import os
 import time
 from pathlib import Path
@@ -74,7 +76,7 @@ class AIEngine:
     def summary(self) -> str:
         """'qwen2.5:14b (llama.cpp) · immagini qwen3.5:9b (Ollama) · ricerca bge-m3 (llama.cpp)'"""
         parts = []
-        for cap, label in ((TEXT, ""), (VISION, "immagini "), (EMBED, "ricerca ")):
+        for cap, label in ((TEXT, ""), (VISION, _("immagini") + " "), (EMBED, _("ricerca") + " ")):
             s = self.strategy(cap)
             if s:
                 parts.append(f"{label}{s.model_for(cap)} ({s.label})")
@@ -86,7 +88,7 @@ class AIEngine:
 
     def why_unavailable(self, capability: str = TEXT) -> str:
         s = self.strategy(capability)
-        return s.why_unavailable(capability) if s else "nessun motore configurato"
+        return s.why_unavailable(capability) if s else _("nessun motore configurato")
 
     # ------------------------------------------------------------ disponibilità
     async def _available(self, capability: str) -> bool:
@@ -113,7 +115,7 @@ class AIEngine:
     def _need(self, capability: str) -> EngineStrategy:
         s = self.strategy(capability)
         if s is None:
-            raise EngineUnsupported(f"nessun motore configurato per: {capability}")
+            raise EngineUnsupported(_("nessun motore configurato per: {capability}", capability=capability))
         return s
 
     # ------------------------------------------------------------ operazioni
@@ -161,7 +163,7 @@ def _pick(requested: str, capability: str, model: str) -> str:
     requested = (requested or "auto").lower()
     if requested != "auto":
         if requested not in ENGINES:
-            raise ValueError(f"motore sconosciuto '{requested}' (disponibili: {', '.join(ENGINES)})")
+            raise ValueError(_("motore sconosciuto '{name}' (disponibili: {names})", name=requested, names=", ".join(ENGINES)))
         return requested
     if capability in (TEXT, EMBED):
         from .engines.llamacpp import LlamaCppEngine, resolve_gguf

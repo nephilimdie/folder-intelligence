@@ -1,3 +1,4 @@
+from ..i18n import N_, _
 from ..intents import Intent
 from .base import Command
 
@@ -5,7 +6,7 @@ from .base import Command
 class UnknownCommand(Command):
     name = "unknown"
     group = "sistema"
-    description = "Frase non riconosciuta"
+    description = N_("Frase non riconosciuta")
     priority = 999
     hidden = True
 
@@ -14,5 +15,5 @@ class UnknownCommand(Command):
 
     async def run(self, ctx, intent: Intent) -> str:
         if ctx.pending:
-            return "Ho un'operazione in attesa: rispondi 'sì' per eseguirla o 'no' per annullarla."
-        return "Non ho capito. Prova con 'trovami i duplicati', 'cerca …', 'organizza i file' oppure 'aiuto'."
+            return _("Ho un'operazione in attesa: rispondi 'sì' per eseguirla o 'no' per annullarla.")
+        return _("Non ho capito. Prova con 'trovami i duplicati', 'cerca …', 'organizza i file' oppure 'aiuto'.")

@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .i18n import _
 from .models import FileInfo, format_size
 from .scanner import Progress, looks_like_copy
 from .threads import Cancelled, parallel_map
@@ -115,7 +116,7 @@ def parse_bmp_gray(data: bytes) -> list[list[float]]:
     height = int.from_bytes(data[22:26], "little", signed=True)
     bpp = int.from_bytes(data[28:30], "little")
     if bpp not in (24, 32):
-        raise ValueError(f"BMP a {bpp} bit non supportato")
+        raise ValueError(_("BMP a {bpp} bit non supportato", bpp=bpp))
     step = bpp // 8
     row_size = ((bpp * width + 31) // 32) * 4
     rows = []
@@ -149,7 +150,7 @@ def image_dhash(path: Path, tmpdir: str) -> int | None:
         r = subprocess.run(["sips", "-s", "format", "bmp", "-z", "8", "9", str(path), "--out", out],
                            capture_output=True, timeout=30)
         if r.returncode or not os.path.exists(out):
-            raise ValueError("immagine non leggibile")
+            raise ValueError(_("immagine non leggibile"))
         with open(out, "rb") as f:
             return dhash_from_gray(parse_bmp_gray(f.read()))
     finally:
@@ -190,11 +191,12 @@ def _image_groups(images: list[FileInfo], hashes: dict[str, int], threshold: int
         files.insert(0, keep)
         kh = hashes[str(keep.path)]
         dists = {str(f.path): hamming(kh, hashes[str(f.path)]) for f in files[1:]}
-        details = {p: ("praticamente identica" if d <= 2 else f"differenza {d}/64") for p, d in dists.items()}
-        details[str(keep.path)] = "⭐ qualità migliore"
+        details = {p: (_("praticamente identica") if d <= 2 else _("differenza {d}/64", d=d))
+                   for p, d in dists.items()}
+        details[str(keep.path)] = _("⭐ qualità migliore")
         worst = max(dists.values()) if dists else 0
-        reason = "foto praticamente identiche" if worst <= 2 else "foto molto simili" if worst <= STRICT \
-            else "foto simili (stessa scena, ritagli o modifiche)"
+        reason = _("foto praticamente identiche") if worst <= 2 else _("foto molto simili") if worst <= STRICT \
+            else _("foto simili (stessa scena, ritagli o modifiche)")
         groups.append(SimilarGroup("foto", files, reason, 1 - worst / 64, keep, details))
     return groups
 
@@ -235,7 +237,7 @@ def version_key(f: FileInfo) -> tuple[str, str] | None:
         return None
     stem = f.path.name[: -len(f.path.suffix)] if f.path.suffix else f.path.name
     norm = stem
-    for _ in range(5):
+    for _round in range(5):
         new = _VERSION_RE.sub("", norm).strip(" _-.")
         if new == norm:
             break
@@ -269,6 +271,7 @@ def _document_groups(docs: list[FileInfo], texts: dict[str, str],
     by_path = {str(f.path): f for f in docs}
     uf = _Groups()
     notes: dict[tuple[str, str], str] = {}
+    kinds_of: dict[tuple[str, str], str] = {}   # "text" | "contains" | "name" (indipendente dalla lingua)
     scores: dict[tuple[str, str], float] = {}
 
     # 1) testo in comune
@@ -297,11 +300,13 @@ def _document_groups(docs: list[FileInfo], texts: dict[str, str],
         contained = k / min(na, nb)
         if jacc >= TEXT_SIMILAR:
             uf.union(a, b)
-            notes[(a, b)] = "testo identico" if jacc > 0.97 else f"testo uguale al {round(jacc * 100)}%"
+            notes[(a, b)] = _("testo identico") if jacc > 0.97 else _("testo uguale al {pct}%", pct=round(jacc * 100))
+            kinds_of[(a, b)] = "text"
             scores[(a, b)] = jacc
         elif contained >= TEXT_CONTAINED and min(na, nb) >= MIN_CONTAINED:
             uf.union(a, b)
-            notes[(a, b)] = "uno contiene l'altro (bozza/estratto)"
+            notes[(a, b)] = _("uno contiene l'altro (bozza/estratto)")
+            kinds_of[(a, b)] = "contains"
             scores[(a, b)] = contained * 0.9
 
     # 2) versioni dello stesso nome, nella stessa cartella ("contratto.pdf", "contratto v2.pdf")
@@ -327,7 +332,8 @@ def _document_groups(docs: list[FileInfo], texts: dict[str, str],
                 if pair in notes or different_text(a, b):
                     continue
                 uf.union(a, b)
-                notes[pair] = "versioni dello stesso documento (dal nome)"
+                notes[pair] = _("versioni dello stesso documento (dal nome)")
+                kinds_of[pair] = "name"
                 scores[pair] = 0.6
 
     groups = []
@@ -336,24 +342,23 @@ def _document_groups(docs: list[FileInfo], texts: dict[str, str],
         keep = files[0]  # il più recente = di solito la versione buona
         members = set(cluster)
         pair_notes = {k: v for k, v in notes.items() if k[0] in members}
-        text_scores = [scores[k] for k, v in pair_notes.items() if v.startswith("testo")]
-        kinds = {("nome" if "nome" in v else "contiene" if "contiene" in v else "testo") for v in pair_notes.values()}
-        if kinds == {"testo"}:
-            low = min(text_scores)
-            reasons = ["testo identico" if low > 0.97 else f"testo uguale al {round(low * 100)}% o più"]
-        elif kinds == {"nome"}:
-            reasons = ["versioni dello stesso documento (dal nome)"]
-        elif kinds == {"contiene"}:
-            reasons = ["un documento contiene l'altro (bozza/estratto/aggiornamento)"]
+        kinds = {kinds_of[k] for k in pair_notes}
+        if kinds == {"text"}:
+            low = min(scores[k] for k in pair_notes)
+            reasons = [_("testo identico") if low > 0.97 else _("testo uguale al {pct}% o più", pct=round(low * 100))]
+        elif kinds == {"name"}:
+            reasons = [_("versioni dello stesso documento (dal nome)")]
+        elif kinds == {"contains"}:
+            reasons = [_("un documento contiene l'altro (bozza/estratto/aggiornamento)")]
         else:
-            reasons = ["stesso documento in versioni o formati diversi"]
-        details = {str(keep.path): "⭐ il più recente"}
+            reasons = [_("stesso documento in versioni o formati diversi")]
+        details = {str(keep.path): _("⭐ il più recente")}
         for (a, b), note in pair_notes.items():
             for p in (a, b):
                 if p != str(keep.path):
                     details.setdefault(p, note)
         score = max((scores[k] for k in pair_notes), default=0.5)
-        groups.append(SimilarGroup("documenti", files, reasons[0] if reasons else "documenti simili",
+        groups.append(SimilarGroup("documenti", files, reasons[0] if reasons else _("documenti simili"),
                                    score, keep, details))
     return groups
 
@@ -405,7 +410,7 @@ def find_similar(files: list[FileInfo], index: Any = None, kind: str = "all", th
             index.set_fingerprints(new)
         result.images_checked = len(hashes)
         if progress:
-            progress("compare", 0, None, "confronto le impronte")
+            progress("compare", 0, None, _("confronto le impronte"))
         result.groups += _image_groups(images, hashes, threshold, cancel)
 
     if kind in ("all", "documents"):
@@ -414,7 +419,7 @@ def find_similar(files: list[FileInfo], index: Any = None, kind: str = "all", th
         result.documents_checked = len(docs)
         result.documents_not_indexed = sum(1 for f in docs if str(f.path) not in texts)
         if progress:
-            progress("compare", 0, None, "confronto i documenti")
+            progress("compare", 0, None, _("confronto i documenti"))
         result.groups += _document_groups(docs, texts, cancel)
 
     result.groups.sort(key=lambda g: (-len(g.files), -g.score))

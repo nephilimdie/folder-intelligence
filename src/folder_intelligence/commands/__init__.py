@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
+from ..i18n import N_, _
 from ..intents import Intent, extract_paths, normalize
 from .base import Command, CommandResult, Request
 
@@ -35,41 +35,21 @@ class CommandRegistry:
             return Intent(cmd.name, path=path, target=target, args=args)
         return Intent("unknown", path=req.paths[0] if req.paths else None)
 
-    def llm_system_prompt(self) -> str:
-        lines = [f'- {c.name}: {c.description}' + (f' (es. "{c.examples[0]}")' if c.examples else "")
-                 for c in self.commands if not c.hidden and c.name not in ("exit", "unknown")]
-        return ("Sei il router di un assistente che gestisce file sul Mac. Scegli il comando più "
-                "adatto alla frase dell'utente. Comandi disponibili:\n" + "\n".join(lines) +
-                '\nRispondi SOLO con JSON: {"command": "<nome>", "path": "<percorso o null>", '
-                '"query": "<testo da cercare/domanda/nota o null>"}. Se nessuno è adatto usa "unknown".')
-
-    def from_llm(self, data: dict[str, Any]) -> Intent:
-        name = str(data.get("command") or data.get("type") or "unknown")
-        if name not in self.by_name or name == "exit":
-            name = "unknown"
-        raw = data.get("path")
-        path = Path(str(raw)).expanduser() if raw and str(raw) not in ("null", "None") else None
-        args: dict[str, Any] = {}
-        q = data.get("query")
-        if q and str(q) not in ("null", "None"):
-            args.update(query=str(q), text=str(q))
-        return Intent(name, path=path, args=args)
-
-    GROUP_TITLES = {"analisi": "🔍 Analisi", "ricerca": "🧠 Ricerca nei contenuti",
-                    "organizzazione": "🗂️  Pulizia e organizzazione", "memoria": "📝 Memoria",
-                    "sistema": "⚙️  Sistema", "altro": "🧩 Altro"}
+    GROUP_TITLES = {"analisi": N_("🔍 Analisi"), "ricerca": N_("🧠 Ricerca nei contenuti"),
+                    "organizzazione": N_("🗂️  Pulizia e organizzazione"), "memoria": N_("📝 Memoria"),
+                    "sistema": N_("⚙️  Sistema"), "altro": N_("🧩 Altro")}
 
     def help_text(self) -> str:
-        lines = ["Ecco cosa posso fare (scrivi in linguaggio naturale, anche più richieste insieme:",
-                 "\"indicizza Documents e poi trova i documenti simili\"):"]
+        lines = [_("Ecco cosa posso fare (scrivi in linguaggio naturale, anche più richieste insieme:"),
+                 _("\"indicizza Documents e poi trova i documenti simili\"):")]
         order = list(self.GROUP_TITLES)
         visible = [c for c in self.commands if not c.hidden and c.examples]
         for group in sorted({c.group for c in visible}, key=lambda g: order.index(g) if g in order else 99):
-            lines.append(f"\n{self.GROUP_TITLES.get(group, group)}")
+            lines.append(f"\n{_(self.GROUP_TITLES.get(group, group))}")
             for c in (c for c in visible if c.group == group):
-                lines.append(f"  • {c.description}")
-                lines.append("      " + "  ·  ".join(f'"{e}"' for e in c.examples[:2]))
-        lines.append("\nTab completa cartelle e comandi · ↑/↓ comandi precedenti · Ctrl+C interrompe")
+                lines.append(f"  • {_(c.description)}")
+                lines.append("      " + "  ·  ".join(f'"{_(e)}"' for e in c.examples[:2]))
+        lines.append("\n" + _("Tab completa cartelle e comandi · ↑/↓ comandi precedenti · Ctrl+C interrompe"))
         return "\n".join(lines)
 
 

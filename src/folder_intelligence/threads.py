@@ -10,6 +10,8 @@ Perché: su cartelle sincronizzate (iCloud Drive, Dropbox, dischi di rete) una s
 
 from __future__ import annotations
 
+from .i18n import _
+
 import asyncio
 import queue
 import threading
@@ -55,7 +57,7 @@ async def _with_timeout(fut: "asyncio.Future[T]", timeout: float) -> T:
     try:
         return await asyncio.wait_for(asyncio.shield(fut), timeout)
     except asyncio.TimeoutError as e:
-        raise Timeout(f"nessuna risposta dopo {timeout:.0f}s") from e
+        raise Timeout(_("nessuna risposta dopo {s}s", s=f"{timeout:.0f}")) from e
 
 
 def call_with_timeout(fn: Callable[[], T], timeout: float) -> T:
@@ -73,7 +75,7 @@ def call_with_timeout(fn: Callable[[], T], timeout: float) -> T:
 
     threading.Thread(target=work, daemon=True).start()
     if not done.wait(timeout):
-        raise Timeout(f"nessuna risposta dopo {timeout:.0f}s")
+        raise Timeout(_("nessuna risposta dopo {s}s", s=f"{timeout:.0f}"))
     if "e" in box:
         raise box["e"]
     return box["v"]
@@ -115,7 +117,7 @@ def parallel_map(
         threading.Thread(target=work, daemon=True).start()
         return True
 
-    for _ in range(workers):
+    for _w in range(workers):
         if not start_next():
             break
 
@@ -129,11 +131,11 @@ def parallel_map(
             for tid, (item, deadline) in list(inflight.items()):
                 if now > deadline:
                     del inflight[tid]
-                    yield item, None, "timeout: file bloccato (sincronizzazione iCloud/rete?)"
+                    yield item, None, _("timeout: file bloccato (sincronizzazione iCloud/rete?)")
                     start_next()
             continue
         if tid not in inflight:
             continue  # arrivato dopo il timeout: già segnalato
-        item, _ = inflight.pop(tid)
+        item, _deadline = inflight.pop(tid)
         yield item, value, err
         start_next()

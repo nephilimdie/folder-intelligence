@@ -16,6 +16,8 @@ imposta `name` e registrala in `engines/__init__.py` (ENGINES).
 
 from __future__ import annotations
 
+from ..i18n import _
+
 import json
 import re
 from abc import ABC
@@ -73,7 +75,7 @@ class EngineStrategy(ABC):
 
     def why_unavailable(self, capability: str = TEXT) -> str:
         """Suggerimento per l'utente quando `available` è False."""
-        return f"{self.label or self.name}: {capability} non disponibile"
+        return _("{engine}: {capability} non disponibile", engine=self.label or self.name, capability=capability)
 
     def describe(self) -> dict[str, Any]:
         return {"engine": self.name, "label": self.label, "model": self.model,
@@ -88,15 +90,15 @@ class EngineStrategy(ABC):
     # ---------------------------------------------------------------- testo
     async def generate_json(self, prompt: str, system: str = "", schema: dict[str, Any] | None = None,
                             model: str | None = None) -> dict[str, Any]:
-        raise EngineUnsupported(f"{self.name}: generazione di testo non supportata")
+        raise EngineUnsupported(_("{engine}: generazione di testo non supportata", engine=self.name))
 
     async def chat(self, messages: list[dict[str, str]], model: str | None = None) -> str:
-        raise EngineUnsupported(f"{self.name}: chat non supportata")
+        raise EngineUnsupported(_("{engine}: chat non supportata", engine=self.name))
 
     # ---------------------------------------------------------------- immagini
     async def describe_image(self, image: Path | bytes, prompt: str, as_json: bool = False) -> Any:
-        raise EngineUnsupported(f"{self.name}: lettura immagini non supportata")
+        raise EngineUnsupported(_("{engine}: lettura immagini non supportata", engine=self.name))
 
     # ---------------------------------------------------------------- vettori
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        raise EngineUnsupported(f"{self.name}: embedding non supportati")
+        raise EngineUnsupported(_("{engine}: embedding non supportati", engine=self.name))

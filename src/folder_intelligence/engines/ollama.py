@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..i18n import _
+
 import base64
 import os
 import time
@@ -56,7 +58,7 @@ class OllamaEngine(EngineStrategy):
 
     def why_unavailable(self, capability: str = TEXT) -> str:
         model = self.model_for(capability)
-        return f"avvia `ollama serve` e scarica il modello con `ollama pull {model}`"
+        return _("avvia `ollama serve` e scarica il modello con `ollama pull {model}`", model=model)
 
     def describe(self) -> dict[str, Any]:
         return {**super().describe(), "url": self.base_url}

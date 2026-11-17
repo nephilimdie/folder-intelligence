@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import shell
-from .base import VISION_PROMPT, ExtractContext, Extraction, Extractor
+from .base import ExtractContext, Extraction, Extractor, vision_prompt
 
 MAX_SIDE = 1280
 
@@ -27,7 +27,7 @@ class ImageExtractor(Extractor):
                 r = await shell.run(["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(path)], timeout=15)
                 for line in r.stdout.splitlines():
                     if "pixelWidth" in line or "pixelHeight" in line:
-                        k, _, v = line.strip().partition(":")
+                        k, _sep, v = line.strip().partition(":")
                         meta[k.strip()] = v.strip()
             if shell.which("tesseract"):
                 r = await shell.run(["tesseract", str(img), "-", "-l", ctx.ocr_lang, "--psm", "3"], timeout=90)
@@ -36,7 +36,7 @@ class ImageExtractor(Extractor):
                     engine += "+ocr"
             if await ctx.vision_ok():
                 try:
-                    description = await ctx.ai.describe_image(img, VISION_PROMPT)  # type: ignore[union-attr]
+                    description = await ctx.ai.describe_image(img, vision_prompt())  # type: ignore[union-attr]
                     engine += "+vision"
                 except Exception:
                     pass

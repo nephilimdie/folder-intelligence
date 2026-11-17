@@ -151,10 +151,19 @@ class Operation:
     @property
     def status(self) -> str:
         if not self.moves:
-            return "fallita"
+            return "failed"
         if not self.undos:
-            return "parziale" if self.failed else "eseguita"
-        return "annullata" if self.restored_count >= len(self.moves) else "annullata in parte"
+            return "partial" if self.failed else "done"
+        return "undone" if self.restored_count >= len(self.moves) else "partially_undone"
+
+    @property
+    def status_label(self) -> str:
+        """Stato leggibile nella lingua dell'utente (`status` resta un codice stabile per le API)."""
+        from .i18n import N_, _
+
+        labels = {"failed": N_("fallita"), "partial": N_("parziale"), "done": N_("eseguita"),
+                  "undone": N_("annullata"), "partially_undone": N_("annullata in parte")}
+        return _(labels.get(self.status, self.status))
 
     @property
     def undoable(self) -> bool:
@@ -163,7 +172,8 @@ class Operation:
     def to_dict(self, with_moves: bool = False) -> dict[str, Any]:
         d = {
             "id": self.id, "ts": self.ts, "kind": self.kind, "source": self.source,
-            "root": self.root, "status": self.status, "undoable": self.undoable,
+            "root": self.root, "status": self.status, "status_label": self.status_label,
+            "undoable": self.undoable,
             "moved": len(self.moves), "failed": len(self.failed),
             "restored": self.restored_count,
             "undos": [{"id": u["id"], "ts": u["ts"], "restored": len(u.get("restored", [])),

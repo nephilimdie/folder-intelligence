@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import audit
 from .classifier import CATEGORIES
+from .i18n import _
 from .models import DuplicateGroup, FileInfo
 
 
@@ -72,15 +73,23 @@ def unique_destination(dst: Path, reserved: set[Path] | None = None) -> Path:
         n += 1
 
 
+def category_folder_names(sub: str) -> set[str]:
+    """Nome della cartella di categoria in ogni lingua supportata ("Documenti" / "Documents")."""
+    from .i18n import SUPPORTED, catalog
+
+    return {sub} | {catalog(code).get(sub, sub) for code in SUPPORTED}
+
+
 def plan_organize(files: list[FileInfo], root: Path, target: Path | None = None) -> Plan:
     """Pianifica lo spostamento di ogni file in `target/<Cartella categoria>/`."""
     target = (target or root).expanduser().resolve()
     plan = Plan(kind="organize", root=str(root))
     reserved: set[Path] = set()
-    category_dirs = {target / sub for sub in CATEGORIES.values()}
+    # cartelle di categoria in tutte le lingue: un file già organizzato (anche in un'altra lingua) resta dov'è
+    category_dirs = {target / name for sub in CATEGORIES.values() for name in category_folder_names(sub)}
 
     for f in files:
-        folder = target / CATEGORIES.get(f.category, CATEGORIES["altro"])
+        folder = target / _(CATEGORIES.get(f.category, CATEGORIES["altro"]))
         # già nella cartella giusta (o in una sua sottocartella) → nulla da fare
         if f.path.parent == folder or folder in f.path.parents:
             continue
@@ -103,7 +112,7 @@ def plan_dedupe(groups: list[DuplicateGroup], root: Path) -> Plan:
         for dup in g.extras:
             dst = unique_destination(trash / dup.name, reserved)
             reserved.add(dst)
-            plan.moves.append(Move(str(dup.path), str(dst), f"copia di {g.keep.path}", g.sha256,
+            plan.moves.append(Move(str(dup.path), str(dst), _("copia di {path}", path=g.keep.path), g.sha256,
                                    keep=str(g.keep.path)))
     return plan
 
@@ -119,9 +128,9 @@ def _verify_still_duplicate(src: Path, keep: Path, sha256: str) -> None:
     from .scanner import hash_file
 
     if not keep.is_file():
-        raise NotDuplicateAnymore(f"l'originale {keep.name} non esiste più: copia lasciata al suo posto")
+        raise NotDuplicateAnymore(_("l'originale {name} non esiste più: copia lasciata al suo posto", name=keep.name))
     if not sha256 or hash_file(src) != sha256 or hash_file(keep) != sha256:
-        raise NotDuplicateAnymore("il contenuto è cambiato dopo la scansione: file lasciato al suo posto")
+        raise NotDuplicateAnymore(_("il contenuto è cambiato dopo la scansione: file lasciato al suo posto"))
 
 
 def apply_plan(plan: Plan, source: str = "cli") -> ApplyResult:
@@ -134,7 +143,7 @@ def apply_plan(plan: Plan, source: str = "cli") -> ApplyResult:
         src, dst = Path(m.src), Path(m.dst)
         try:
             if not src.exists():
-                raise FileNotFoundError("file non più presente")
+                raise FileNotFoundError(_("file non più presente"))
             if m.keep:
                 _verify_still_duplicate(src, Path(m.keep), m.sha256)
             fp = audit.file_fingerprint(src, m.sha256)
@@ -188,9 +197,9 @@ def _undo(op: audit.Operation, source: str) -> UndoResult:
         cur, original = Path(m["dst"]), Path(m["src"])
         try:
             if not cur.exists():
-                raise FileNotFoundError("file non trovato nella destinazione (spostato o Cestino svuotato?)")
+                raise FileNotFoundError(_("file non trovato nella destinazione (spostato o Cestino svuotato?)"))
             if cur.stat().st_size != m.get("size", cur.stat().st_size):
-                warnings.append(f"{cur.name}: modificato dopo lo spostamento, ripristinato comunque")
+                warnings.append(_("{name}: modificato dopo lo spostamento, ripristinato comunque", name=cur.name))
             target = unique_destination(original)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(cur), str(target))

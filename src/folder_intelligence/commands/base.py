@@ -62,18 +62,19 @@ class Request:
         return re.search(pattern, self.norm)
 
 
-# Descrizione degli argomenti per il router AI (un comando può aggiungerne in `param_docs`).
+# Descrizione degli argomenti per il router AI, in inglese (lingua dei prompt).
+# Un comando può aggiungerne in `param_docs`.
 PARAM_DOCS = {
-    "query": "testo da cercare o domanda",
-    "text": "testo della nota",
-    "n": "quanti elementi (numero)",
+    "query": "text to search for, or question",
+    "text": "text of the note",
+    "n": "how many items (number)",
     "kind": "images | documents | all",
     "strictness": "strict | normal | loose",
     "format": "md | json | csv",
-    "limit": "numero massimo di file",
-    "ref": "id o numero dell'operazione",
-    "file": "nome o parte del nome del file",
-    "target": "cartella di destinazione",
+    "limit": "maximum number of files",
+    "ref": "id or number of the operation",
+    "file": "name or part of the file name",
+    "target": "destination folder",
 }
 
 

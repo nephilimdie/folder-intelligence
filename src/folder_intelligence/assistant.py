@@ -17,6 +17,7 @@ from . import organizer
 from .ai import AIEngine
 from .classifier import FileClassifier
 from .commands import CommandRegistry, CommandResult, registry
+from .i18n import _, is_question
 from .intelligence import DocumentIntelligence
 from .intents import Intent
 from .mcp_memory import McpMemory
@@ -108,7 +109,7 @@ class Assistant:
         """Scansione veloce (solo metadati), in cache per cartella."""
         root = self.resolve(path)
         if refresh or root not in self.scans:
-            self.status(f"Scansiono {root} …")
+            self.status(_("Scansiono {root} …", root=root))
             scan = await run_blocking(scan_directory, root, False, self.progress, self.cancel)
             for f in scan.files:
                 rule = self.classifier.rules.classify(f.path)
@@ -120,7 +121,7 @@ class Assistant:
     async def get_duplicates(self, scan: ScanResult) -> ScanResult:
         """Calcola i duplicati solo quando servono (legge i file: può richiedere tempo)."""
         if not scan.duplicates_checked:
-            self.status("Confronto i contenuti per trovare i duplicati …")
+            self.status(_("Confronto i contenuti per trovare i duplicati …"))
             await run_blocking(compute_duplicates, scan, self.progress, self.cancel)
         return scan
 
@@ -139,7 +140,7 @@ class Assistant:
             else:
                 todo.append(f)
         if todo and self.use_ai and self.ai and await self.ai.is_available():
-            self.status(f"Classifico con AI locale ({self.ai.model}) …")
+            self.status(_("Classifico con AI locale ({model}) …", model=self.ai.model))
             await self.classifier.classify_all(
                 [f for f in todo if not f.cloud_only], use_ai=True, ai_limit=self.ai_limit,
                 progress=self.progress)
@@ -157,13 +158,13 @@ class Assistant:
         local = [f for f in scan.files if not f.cloud_only]
         todo = sorted(local, key=lambda f: -f.modified)[: self.index_limit]
         if not todo:
-            return f"In {scan.root} non ci sono file leggibili su questo Mac (sono tutti solo su iCloud)."
+            return _("In {root} non ci sono file leggibili su questo Mac (sono tutti solo su iCloud).", root=scan.root)
 
         async def go() -> str:
             first = await self.dispatch(Intent("index", path=scan.root))
             return first + "\n\n" + await then()
 
-        self.pending = PendingAction("index", go, f"indicizzare {scan.root}")
+        self.pending = PendingAction("index", go, _("indicizzare {root}", root=scan.root))
         vision = bool(self.ai and self.intelligence.use_vision)
         secs = 0.0
         for f in todo:
@@ -173,13 +174,15 @@ class Assistant:
                     else "other")
             secs += INDEX_SECONDS[kind] if (vision or kind in ("pdf", "other")) else 1.0
         secs /= 2  # due analisi in parallelo
-        eta = f"circa {max(1, round(secs / 60))} minuti" if secs >= 90 else "meno di un minuto e mezzo"
-        lines = [f"Per {why} devo prima leggere il contenuto dei file di {scan.root}.",
-                 f"Analizzerei i {len(todo)} file più recenti" + (f" (su {len(local)})" if len(local) > len(todo) else "")
-                 + f": {eta}. Tutto resta sul Mac e l'indice è cifrato."]
+        eta = (_("circa {n} minuti", n=max(1, round(secs / 60))) if secs >= 90
+               else _("meno di un minuto e mezzo"))
+        of_total = _(" (su {total})", total=len(local)) if len(local) > len(todo) else ""
+        lines = [_("Per {why} devo prima leggere il contenuto dei file di {root}.", why=why, root=scan.root),
+                 _("Analizzerei i {n} file più recenti{of_total}: {eta}. Tutto resta sul Mac e l'indice è cifrato.",
+                   n=len(todo), of_total=of_total, eta=eta)]
         if scan.cloud_only_count:
-            lines.append(f"☁️  {scan.cloud_only_count} file solo su iCloud verranno saltati.")
-        lines.append("\nVuoi che li legga ora? (sì/no)")
+            lines.append(_("☁️  {n} file solo su iCloud verranno saltati.", n=scan.cloud_only_count))
+        lines.append("\n" + _("Vuoi che li legga ora? (sì/no)"))
         return "\n".join(lines)
 
     async def sync_mcp(self, root: Path) -> str:
@@ -190,18 +193,19 @@ class Assistant:
         docs = [d for d in (index.get(p) for p in index.under(root)) if d]
         res = await self.mcp.sync_folder(root, docs)
         if res["error"]:
-            return f"⚠️  Memoria MCP: {res['error']} (i dati restano comunque nell'indice locale cifrato)."
-        what = ("inventario senza contenuti" if res["mode"] == "sealed"
-                else f"{res['written']} voci con riassunti ripuliti dai dati personali")
-        return f"🔐 Memoria MCP aggiornata ({what}, namespace {self.mcp.namespace})."
+            return _("⚠️  Memoria MCP: {error} (i dati restano comunque nell'indice locale cifrato).",
+                     error=res["error"])
+        what = (_("inventario senza contenuti") if res["mode"] == "sealed"
+                else _("{n} voci con riassunti ripuliti dai dati personali", n=res["written"]))
+        return _("🔐 Memoria MCP aggiornata ({what}, namespace {ns}).", what=what, ns=self.mcp.namespace)
 
     def skipped_note(self, scan: ScanResult) -> str:
         unread = [e for e in scan.errors if "timeout" in e]
         notes = []
         if scan.cloud_only_count:
-            notes.append(f"☁️  {scan.cloud_only_count} file solo su iCloud non controllati")
+            notes.append(_("☁️  {n} file solo su iCloud non controllati", n=scan.cloud_only_count))
         if unread:
-            notes.append(f"⏳ {len(unread)} file non leggibili (bloccati dalla sincronizzazione), saltati")
+            notes.append(_("⏳ {n} file non leggibili (bloccati dalla sincronizzazione), saltati", n=len(unread)))
         return ("\n" + "\n".join(notes)) if notes else ""
 
     def invalidate(self) -> None:
@@ -263,26 +267,26 @@ class Assistant:
         labels = [describe_step(s, self.registry) for s in steps]
         out: list[str] = []
         if not offset:
-            out.append("🧭 Farò, in ordine:\n" + "\n".join(f"  {i}. {lbl}" for i, lbl in enumerate(labels, 1)))
+            out.append(_("🧭 Farò, in ordine:") + "\n" + "\n".join(f"  {i}. {lbl}" for i, lbl in enumerate(labels, 1)))
         results: list[dict[str, Any]] = []
         for i, step in enumerate(steps):
             if self.cancel.is_set():
                 break
             n = f"{i + 1}/{len(steps)}" if not offset else "→"
-            self.status(f"Passo {n}: {labels[i]} …")
+            self.status(_("Passo {n}: {label} …", n=n, label=labels[i]))
             res = await self.run_intent(step)
             out.append(f"── {n} · {labels[i]}\n{res}")
             results.append(res.data)
             if res.data.get("cancelled") or res.data.get("error"):
                 if i < len(steps) - 1:
-                    out.append("Mi fermo qui: i passi successivi non sono stati eseguiti.")
+                    out.append(_("Mi fermo qui: i passi successivi non sono stati eseguiti."))
                 break
             if self.pending is not None and i < len(steps) - 1:
                 self.plan_rest = steps[i + 1:]
-                note = "Dopo la tua risposta proseguo con: " + ", ".join(labels[i + 1:]) + "."
+                note = _("Dopo la tua risposta proseguo con: {steps}.", steps=", ".join(labels[i + 1:]))
                 # la domanda (sì/no) deve restare l'ultima riga: la nota va subito prima
                 lines = out[-1].splitlines()
-                q = max((k for k, line in enumerate(lines) if "(sì/no)" in line), default=len(lines))
+                q = max((k for k, line in enumerate(lines) if is_question(line)), default=len(lines))
                 out[-1] = "\n".join(lines[:q] + [note] + lines[q:])
                 break
         data: dict[str, Any] = {"command": "plan", "steps": results}
@@ -298,13 +302,13 @@ class Assistant:
         try:
             reply = await self.dispatch(intent)
         except Cancelled:
-            reply = CommandResult("⏹️  Interrotto. Nessun file è stato modificato.", {"cancelled": True})
+            reply = CommandResult(_("⏹️  Interrotto. Nessun file è stato modificato."), {"cancelled": True})
         except NotADirectoryError as e:
             reply = CommandResult(str(e), {"error": "not_a_directory"})
         except PermissionError as e:
             reply = CommandResult(
-                f"Permesso negato: {e.filename or e}. Su macOS concedi 'Accesso completo al disco' "
-                "al Terminale (Impostazioni → Privacy e sicurezza).", {"error": "permission_denied"})
+                _("Permesso negato: {what}. Su macOS concedi 'Accesso completo al disco' al Terminale "
+                  "(Impostazioni → Privacy e sicurezza).", what=e.filename or e), {"error": "permission_denied"})
         return reply
 
     async def dispatch(self, intent: Intent, text: str = "") -> CommandResult:

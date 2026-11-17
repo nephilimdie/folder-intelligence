@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from .. import organizer
+from ..i18n import N_, _, _n
 from ..intents import YES, Intent
 from .base import Command, CommandResult, Request
 
@@ -8,7 +9,7 @@ from .base import Command, CommandResult, Request
 class ConfirmCommand(Command):
     name = "confirm"
     group = "sistema"
-    description = "Conferma l'operazione in attesa"
+    description = N_("Conferma l'operazione in attesa")
     priority = 12
     hidden = True
     destructive = True
@@ -18,27 +19,31 @@ class ConfirmCommand(Command):
 
     async def run(self, ctx, intent: Intent) -> str:
         if not ctx.pending:
-            return "Non c'è nessuna operazione in attesa di conferma."
+            return _("Non c'è nessuna operazione in attesa di conferma.")
         plan, ctx.pending = ctx.pending, None
         from ..assistant import PendingAction
 
         if isinstance(plan, PendingAction):
             return await plan.run()
-        ctx.status(f"Eseguo {len(plan)} spostamenti …")
+        ctx.status(_("Eseguo {n} spostamenti …", n=len(plan)))
         result = await ctx.blocking(organizer.apply_plan, plan, ctx.source)
         for m in result.done:
             ctx.intelligence.index.move(m.src, m.dst)
         ctx.invalidate()
-        verb = "spostati nel Cestino" if plan.kind == "dedupe" else "organizzati"
-        lines = [f"✅ {len(result.done)} file {verb}."]
+        n = len(result.done)
+        summary = (_n("{n} file spostato nel Cestino", "{n} file spostati nel Cestino", n) if plan.kind == "dedupe"
+                   else _n("{n} file organizzato", "{n} file organizzati", n))
+        lines = [f"✅ {summary}."]
         if result.failed:
-            lines.append(f"⚠️  {len(result.failed)} non riusciti:")
+            lines.append(_("⚠️  {n} non riusciti:", n=len(result.failed)))
             lines += [f"  {Path(m.src).name}: {err}" for m, err in result.failed[:10]]
-        await ctx.memory.save(plan.kind, f"{plan.kind} su {plan.root}: {len(result.done)} file {verb}",
+        await ctx.memory.save(plan.kind, _("{kind} su {root}: {summary}", kind=plan.kind, root=plan.root,
+                                           summary=summary),
                               {"operation_id": result.operation_id})
         if result.operation_id:
-            lines.append(f"Registrata nell'audit come operazione {result.operation_id}. "
-                         "Per ripristinare: 'annulla l'ultima operazione' (storico: 'mostra lo storico').")
+            lines.append(_("Registrata nell'audit come operazione {id}. Per ripristinare: "
+                           "'annulla l'ultima operazione' (storico: 'mostra lo storico').",
+                           id=result.operation_id))
         return CommandResult("\n".join(lines), {
             "operation_id": result.operation_id, "moved": [{"src": m.src, "dst": m.dst} for m in result.done],
             "failed": [{"src": m.src, "error": err} for m, err in result.failed]})
