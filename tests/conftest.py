@@ -7,7 +7,6 @@ import pytest
 # chiave di test: i test non devono mai usare il Portachiavi reale
 os.environ.setdefault("FI_MASTER_KEY", base64.b64encode(b"k" * 32).decode())
 os.environ["FI_MCP_MODE"] = "off"
-os.environ["FI_USE_SERVER"] = "0"  # i test non devono usare un server folder-intelligence acceso
 os.environ["FI_LOW_MEMORY"] = "0"  # risultato indipendente dalla RAM del Mac che esegue i test
 
 

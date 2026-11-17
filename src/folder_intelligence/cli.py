@@ -211,8 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     engines = ["auto", *ENGINES]
     p.add_argument("--engine", choices=engines, default=DEFAULT_ENGINE,
                    help="motore AI per testo e router: auto (llama.cpp se disponibile, altrimenti Ollama), "
-                        "llamacpp (dentro l'app), ollama, mlx, remote (modelli del server --serve; "
-                        "con auto viene scelto da solo se il server è acceso)")
+                        "llamacpp (dentro l'app), ollama, mlx")
     p.add_argument("--vision-engine", choices=engines, default=DEFAULT_VISION_ENGINE,
                    help="motore per le immagini (auto = Ollama)")
     p.add_argument("--embed-engine", choices=engines, default=DEFAULT_EMBED_ENGINE,
@@ -233,10 +232,10 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def build_ai(args: argparse.Namespace, allow_remote: bool = True):
+def build_ai(args: argparse.Namespace):
     return create_ai(engine=args.engine, vision_engine=args.vision_engine, embed_engine=args.embed_engine,
                      model=args.model, vision_model=args.vision_model, embed_model=args.embed_model,
-                     ollama_url=args.ollama_url, allow_remote=allow_remote)
+                     ollama_url=args.ollama_url)
 
 
 async def ai_state_line(ai) -> str:
@@ -500,7 +499,7 @@ def _main(argv: list[str] | None = None) -> int:
 
         if args.mcp_mode:
             os.environ["FI_MCP_MODE"] = args.mcp_mode
-        return serve(args.host, args.port, ai=None if args.no_ai else build_ai(args, allow_remote=False),
+        return serve(args.host, args.port, ai=None if args.no_ai else build_ai(args),
                      memory=args.memory, use_vision=not args.no_vision)
 
     directory = Path(args.directory).expanduser()

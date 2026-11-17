@@ -100,32 +100,6 @@ class CommandRequest(BaseModel):
                                                       "altrimenti 202 e il job prosegue in background")
 
 
-class AIGenerateRequest(BaseModel):
-    prompt: str
-    system: str = ""
-    json_schema: dict[str, Any] | None = Field(None, description="schema JSON che vincola la risposta")
-    model: str | None = None
-
-
-class AIChatRequest(BaseModel):
-    messages: list[dict[str, str]]
-    model: str | None = None
-
-
-class AIEmbedRequest(BaseModel):
-    texts: list[str]
-
-
-class AIImageRequest(BaseModel):
-    image_b64: str
-    prompt: str
-    as_json: bool = False
-
-
-class AIReleaseRequest(BaseModel):
-    capability: Literal["text", "vision", "embed"]
-
-
 class ConfirmRequest(BaseModel):
     confirm: bool
     wait: float = Field(2.0, ge=0, le=60)
@@ -265,49 +239,6 @@ def create_app(
     @app.get("/health", tags=["generale"])
     async def health() -> dict[str, Any]:
         return {"ok": True, "version": __version__, "service": "folder-intelligence"}
-
-    # ------------------------------------------------------------------ motore AI condiviso
-    # La chat (e l'app Mac) usano i modelli già caricati qui invece di caricarne una copia propria.
-    def need_ai() -> AIEngine:
-        if state.ollama is None:
-            raise HTTPException(503, "AI disattivata su questo server")
-        return state.ollama
-
-    @app.get("/ai/status", tags=["ai"], dependencies=secured)
-    async def ai_status() -> dict[str, Any]:
-        ai = state.ollama
-        if ai is None:
-            return {"text": False, "vision": False, "embed": False, "engines": None, "swap": False}
-        return {"text": await ai.is_available(), "vision": await ai.can_see(), "embed": await ai.can_embed(),
-                "engines": ai.describe(), "swap": ai.swap_text_and_vision(), "summary": ai.summary()}
-
-    @app.post("/ai/generate_json", tags=["ai"], dependencies=secured)
-    async def ai_generate_json(req: AIGenerateRequest) -> dict[str, Any]:
-        return {"result": await need_ai().generate_json(req.prompt, system=req.system,
-                                                        schema=req.json_schema, model=req.model)}
-
-    @app.post("/ai/chat", tags=["ai"], dependencies=secured)
-    async def ai_chat(req: AIChatRequest) -> dict[str, Any]:
-        return {"result": await need_ai().chat(req.messages, model=req.model)}
-
-    @app.post("/ai/embed", tags=["ai"], dependencies=secured)
-    async def ai_embed(req: AIEmbedRequest) -> dict[str, Any]:
-        return {"result": await need_ai().embed(req.texts)}
-
-    @app.post("/ai/describe_image", tags=["ai"], dependencies=secured)
-    async def ai_describe_image(req: AIImageRequest) -> dict[str, Any]:
-        import base64 as _b64
-
-        try:
-            raw = _b64.b64decode(req.image_b64, validate=True)
-        except ValueError as e:
-            raise HTTPException(400, "immagine non valida (base64)") from e
-        return {"result": await need_ai().describe_image(raw, req.prompt, as_json=req.as_json)}
-
-    @app.post("/ai/release", tags=["ai"], dependencies=secured)
-    async def ai_release(req: AIReleaseRequest) -> dict[str, Any]:
-        await need_ai().release(req.capability)
-        return {"ok": True}
 
     @app.get("/status", tags=["generale"], dependencies=secured)
     async def status() -> dict[str, Any]:
@@ -696,9 +627,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, ai: AIEngine | None = None,
 
     token = get_or_create_token()
     if ai is None and use_ai:
-        ai = create_ai(allow_remote=False)
-    if ai is not None:
-        ai.forbid_remote()  # il server non può usare se stesso come motore
+        ai = create_ai()
     app = create_app(ai, ai is not None, create_memory(memory), token=token, use_vision=use_vision)
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(f"⚠️  Attenzione: API esposte su {host}, raggiungibili da altri dispositivi in rete.")

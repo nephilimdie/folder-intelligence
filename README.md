@@ -113,7 +113,6 @@ intercambiabile (`engines/`):
 | `llamacpp` | ✅ | ✅ | — | dentro l'app (llama-cpp-python, GPU Metal); JSON vincolato da grammatica |
 | `ollama` | ✅ | ✅ | ✅ | servizio esterno `ollama serve` |
 | `mlx` | predisposto | predisposto | predisposto | non ancora implementato |
-| `remote` | ✅ | ✅ | ✅ | usa i modelli già caricati dal server `--serve` (niente seconda copia) |
 
 Predefinito (`auto`): **testo e embedding con llama.cpp** se installato e se il modello è
 disponibile, **immagini con Ollama**. Per scegliere: `--engine llamacpp|ollama|mlx|auto`,
@@ -132,10 +131,6 @@ riprova una volta (`FI_LLAMA_FREE_OLLAMA=0` per disattivare). Altre opzioni: `FI
 (contesto, 8192), `FI_LLAMA_BATCH` (2048), `FI_LLAMA_FLASH_ATTN` (1).
 
 Installazione: `pip install llama-cpp-python` (si compila con Metal in qualche minuto).
-
-**Chat e server insieme:** se il server API è acceso, la chat (con `--engine auto`) usa i suoi
-modelli tramite `/ai/*` su 127.0.0.1 con il token: in memoria resta una sola copia. Il server
-non usa mai se stesso come motore. Disattivabile con `FI_USE_SERVER=0`; indirizzo con `FI_SERVER_URL`.
 
 **Indicizzazione con poca memoria** (< 32 GB, o `FI_LOW_MEMORY=1`) e motori diversi per testo e
 immagini: i file vengono analizzati a blocchi di 16 (`FI_PHASE_BATCH`): prima le letture visive
