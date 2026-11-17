@@ -1,0 +1,40 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# macOS
+.DS_Store
+._*
+
+# Editor / strumenti agenti
+.idea/
+.vscode/
+.claude-mpm/
+.claude/settings.local.json
+
+# Backup e report generati (contengono nomi e percorsi dei file personali)
+.backup/
+folder-report-*
+*.report.json
+
+# Dati dell'app: non devono MAI finire nel repository
+.folder_intelligence/
+*.enc
+master.key
+api_token
+audit.jsonl
+index.db
+index.db-*
+history
+.env
+.env.*
