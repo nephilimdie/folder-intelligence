@@ -59,7 +59,7 @@ class Assistant:
         scan_cache: dict[Path, ScanResult] | None = None,
         intelligence: DocumentIntelligence | None = None,
         use_vision: bool = True,
-        index_limit: int = 200,
+        index_limit: int | None = None,   # None = tutti i file
         commands: CommandRegistry | None = None,
         mcp: "McpMemory | None" = None,
         router_model: str | None = None,
@@ -156,7 +156,7 @@ class Assistant:
         from .intents import Intent
 
         local = [f for f in scan.files if not f.cloud_only]
-        todo = sorted(local, key=lambda f: -f.modified)[: self.index_limit]
+        todo = sorted(local, key=lambda f: -f.modified)[: self.index_limit or None]
         if not todo:
             return _("In {root} non ci sono file leggibili su questo Mac (sono tutti solo su iCloud).", root=scan.root)
 
@@ -174,7 +174,8 @@ class Assistant:
                     else "other")
             secs += INDEX_SECONDS[kind] if (vision or kind in ("pdf", "other")) else 1.0
         secs /= 2  # due analisi in parallelo
-        eta = (_("circa {n} minuti", n=max(1, round(secs / 60))) if secs >= 90
+        eta = (_("circa {n} ore", n=round(secs / 3600, 1)) if secs >= 5400
+               else _("circa {n} minuti", n=max(1, round(secs / 60))) if secs >= 90
                else _("meno di un minuto e mezzo"))
         of_total = _(" (su {total})", total=len(local)) if len(local) > len(todo) else ""
         lines = [_("Per {why} devo prima leggere il contenuto dei file di {root}.", why=why, root=scan.root),
@@ -311,8 +312,18 @@ class Assistant:
                   "(Impostazioni → Privacy e sicurezza).", what=e.filename or e), {"error": "permission_denied"})
         return reply
 
+    def globally_indexed(self, root: Path) -> bool:
+        """True se `root` non è indicizzata ma altre cartelle sì (ricerca/domande su tutto l'indice)."""
+        index = self.intelligence.index
+        return not index.stats(root)["documents"] and bool(index.stats()["documents"])
+
     async def dispatch(self, intent: Intent, text: str = "") -> CommandResult:
         cmd = self.registry.get(intent.type) or self.registry.get("unknown")
+        # "indicizza Documents" e poi "cerca …": la cartella indicata diventa quella di lavoro
+        if intent.path is not None and cmd is not None and cmd.needs_folder:
+            folder = self.resolve(intent.path)
+            if folder.is_dir():
+                self.directory = folder
         res = await cmd.run(self, intent)  # type: ignore[union-attr]
         if not isinstance(res, CommandResult):
             res = CommandResult(str(res))

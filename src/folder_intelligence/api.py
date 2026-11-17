@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import __version__, audit, completion, exporter, organizer
+from . import __version__, agenda, audit, completion, exporter, organizer
 from .ai import AIEngine, create_ai
 from .assistant import Assistant
 from .audit import app_home
@@ -68,7 +68,7 @@ class ScanRequest(BaseModel):
     duplicates: bool = Field(False, description="also find duplicates (reads the files)")
     classify: bool = Field(False, description="also classify with the AI (slower)")
     index: bool = Field(False, description="analyze the content (OCR, vision, documents) and index it")
-    index_limit: int = Field(200, ge=1, le=100_000)
+    index_limit: int | None = Field(None, ge=1, le=1_000_000, description="max files to index (default: all)")
     refresh: bool = Field(True, description="ignore the cache and rescan")
 
 
@@ -100,6 +100,17 @@ class CommandRequest(BaseModel):
     wait: float = Field(2.0, ge=0, le=60, description="seconds to wait: if the command finishes earlier the "
                                                       "response is complete, otherwise 202 and the job continues "
                                                       "in the background")
+
+
+class AgendaRequest(BaseModel):
+    text: str = Field(..., description="what to do; a date in the text is recognized ('friday', '20/12')")
+    due: str | None = Field(None, description="due date YYYY-MM-DD (overrides the one in the text)")
+
+
+class AgendaUpdate(BaseModel):
+    done: bool | None = None
+    text: str | None = None
+    due: str | None = Field(None, description="YYYY-MM-DD, or empty string to remove the date")
 
 
 class ConfirmRequest(BaseModel):
@@ -578,6 +589,50 @@ def create_app(
     @app.delete("/chat/{session_id}", tags=["chat"], dependencies=secured, status_code=204)
     async def end_chat(session_id: str) -> None:
         state.sessions.pop(session_id, None)
+
+    # ------------------------------------------------------------------ agenda
+    @app.get("/agenda", tags=["agenda"], dependencies=secured)
+    async def agenda_list(include_done: bool = False) -> dict[str, Any]:
+        """Cose da fare (scadute, oggi, prossimi giorni, senza data) ed eventualmente quelle fatte."""
+        items = agenda.pending() + (agenda.recently_done(50) if include_done else [])
+        return {"items": [i.to_dict() for i in items]}
+
+    @app.post("/agenda", tags=["agenda"], dependencies=secured, status_code=201)
+    async def agenda_add(req: AgendaRequest) -> dict[str, Any]:
+        from datetime import date as _date
+
+        from .dates import parse_due
+
+        due, text = parse_due(req.text)
+        if req.due:
+            try:
+                due = _date.fromisoformat(req.due[:10])
+            except ValueError as e:
+                raise HTTPException(422, _("Data non valida: {value}", value=req.due)) from e
+        return agenda.add(text or req.text, due).to_dict()
+
+    @app.patch("/agenda/{item_id}", tags=["agenda"], dependencies=secured)
+    async def agenda_update(item_id: int, req: AgendaUpdate) -> dict[str, Any]:
+        from datetime import date as _date
+
+        if agenda.find(item_id) is None:
+            raise HTTPException(404, _("Voce dell'agenda non trovata"))
+        if req.done is not None:
+            agenda.set_done(item_id, req.done)
+        if req.text is not None or req.due is not None:
+            due: Any = "keep"
+            if req.due is not None:
+                try:
+                    due = _date.fromisoformat(req.due[:10]) if req.due else None
+                except ValueError as e:
+                    raise HTTPException(422, _("Data non valida: {value}", value=req.due)) from e
+            agenda.update(item_id, req.text, due)
+        return agenda.find(item_id).to_dict()  # type: ignore[union-attr]
+
+    @app.delete("/agenda/{item_id}", tags=["agenda"], dependencies=secured, status_code=204)
+    async def agenda_delete(item_id: int) -> None:
+        if agenda.remove(item_id) is None:
+            raise HTTPException(404, _("Voce dell'agenda non trovata"))
 
     # ------------------------------------------------------------------ memoria
     @app.get("/memory", tags=["memoria"], dependencies=secured)

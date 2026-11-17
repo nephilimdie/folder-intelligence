@@ -326,8 +326,19 @@ class DocumentIntelligence:
                 scores[p] = scores.get(p, 0) + weight / (K + rank + 1)
                 sources.setdefault(p, []).append(label)
 
-        need = required_terms(len(query_terms(query))) if precise else 1
-        fts = self.index.fts(query, root, 50, min_match=need)
+        # date citate ("31/03/2024", "marzo 2024"): contano come filtro, non come parole qualsiasi
+        from .dates import query_dates, strip_dates
+
+        date_specs = query_dates(query)
+        text_query = strip_dates(query, date_specs) if date_specs else query
+        dated: set[str] = set()
+        for spec in date_specs:
+            dated.update(self.index.dated(spec, root))
+        if date_specs:
+            add(sorted(dated), N_("data"), 1.6)
+
+        need = required_terms(len(query_terms(text_query))) if precise else 1
+        fts = self.index.fts(text_query, root, 50, min_match=need) if query_terms(text_query) else []
         add([p for p, _s, _n in fts], N_("testo"), 1.0)
         for p, _score, snip in fts:
             snippets.setdefault(p, snip)
@@ -352,12 +363,12 @@ class DocumentIntelligence:
             except Exception:
                 pass
 
-        spot_query = " ".join(query_terms(query)) if precise else query
+        spot_query = " ".join(query_terms(text_query)) if precise else query
         spot = await shell.mdfind(spot_query, root, 50) if spot_query else []
         add([str(p) for p in spot if p.is_file()], N_("spotlight"), 0.8)
 
         if names:
-            terms = query_terms(query)
+            terms = query_terms(text_query)
             if terms:
                 import unicodedata
 
@@ -368,6 +379,13 @@ class DocumentIntelligence:
                 matched = [str(p) for p in names if all(t in norm(p.name) for t in terms)]
                 add(matched[:50], N_("nome"), 1.1)
 
+        if date_specs and dated and precise:
+            # è stata chiesta una data precisa e qualcosa corrisponde: solo quei documenti…
+            scores = {p: sc for p, sc in scores.items() if p in dated}
+            # …e, se alcuni corrispondono anche alle parole cercate, solo quelli
+            both = {p for p in scores if len(set(sources.get(p, []))) > 1}
+            if both and query_terms(text_query):
+                scores = {p: sc for p, sc in scores.items() if p in both}
         ranked = sorted(scores.items(), key=lambda kv: -kv[1])[:limit]
         return [Hit(p, s, self.index.get(p), snippets.get(p, ""), sources.get(p, [])) for p, s in ranked]
 

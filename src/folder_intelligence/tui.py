@@ -31,6 +31,7 @@ from prompt_toolkit.widgets import Frame, TextArea
 
 from . import completion
 from . import history as enc_history
+from . import agenda
 from .i18n import N_, _, is_question
 from .jobs import CANCELLED, DONE, ERROR, Job, JobManager
 
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from .assistant import Assistant
 
 FOREGROUND_SECONDS = 1.5
+AGENDA_MAX_LINES = 10
 PANEL_WIDTH = 42
 WIDE_MIN_COLUMNS = 100
 MAX_LINES = 4000
@@ -55,6 +57,10 @@ STYLE = Style.from_dict({
     "err": "ansired",
     "jobhead": "bold",
     "title": "bold ansicyan",
+    "due": "ansicyan",
+    "today": "bold ansiyellow",
+    "overdue": "bold ansired",
+    "done": "ansibrightblack",
     "frame.border": "ansibrightblack",
     "frame.label": "bold",
     "sel": "reverse bold ansicyan",
@@ -182,6 +188,11 @@ class ChatTUI:
         # ------------------------------------------------------------ pannello
         self.panel = Frame(Window(FormattedTextControl(self._render_jobs), wrap_lines=True),
                            title=lambda: _("Attività ({n})", n=len(self.jobs.active())), width=D(preferred=PANEL_WIDTH))
+        # agenda sotto le attività: cose da fare con la data
+        self.agenda_panel = Frame(
+            Window(FormattedTextControl(self._render_agenda), wrap_lines=True,
+                   height=lambda: D(min=3, max=self._agenda_height(), preferred=self._agenda_height())),
+            title=lambda: _("📅 Agenda ({n})", n=len(agenda.pending())), width=D(preferred=PANEL_WIDTH))
 
         left = HSplit([
             self.output,
@@ -195,12 +206,16 @@ class ChatTUI:
         def body():
             cols = self._columns()
             if cols >= WIDE_MIN_COLUMNS:
-                return VSplit([left, self.panel])
-            # terminale stretto: il box va sotto, e solo se ci sono attività
+                return VSplit([left, HSplit([self.panel, self.agenda_panel], width=D(preferred=PANEL_WIDTH))])
+            # terminale stretto: i box vanno sotto, e solo se c'è qualcosa da mostrare
             show = Condition(lambda: bool(self.jobs.active()))
+            show_agenda = Condition(lambda: bool(agenda.pending()))
             return HSplit([left, ConditionalContainer(
                 Frame(Window(FormattedTextControl(self._render_jobs), height=D(max=6), wrap_lines=True),
-                      title=lambda: _("Attività ({n})", n=len(self.jobs.active()))), filter=show)])
+                      title=lambda: _("Attività ({n})", n=len(self.jobs.active()))), filter=show),
+                ConditionalContainer(
+                Frame(Window(FormattedTextControl(self._render_agenda), height=D(max=5), wrap_lines=True),
+                      title=lambda: _("📅 Agenda ({n})", n=len(agenda.pending()))), filter=show_agenda)])
 
         root = FloatContainer(
             content=HSplit([DynamicContainer(body),
@@ -333,10 +348,41 @@ class ChatTUI:
                 icon = {DONE: "✅", ERROR: "❌", CANCELLED: "⏹️ "}.get(j.status, "•")
                 if j.confirmation:
                     icon = "❓"
-                title = j.title if len(j.title) <= width + 4 else j.title[: width + 3] + "…"
-                out += [("", f"#{j.id} {icon} {title}"), ("class:info", f" {_fmt_secs(j.elapsed)}\n")]
+                secs = _fmt_secs(j.elapsed)
+                room = width + 6 - len(f"#{j.id}") - len(secs) - 2  # titolo + tempo sulla stessa riga
+                title = j.title if len(j.title) <= room else j.title[: max(4, room - 1)] + "…"
+                out += [("", f"#{j.id} {icon} {title}"), ("class:info", f" {secs}\n")]
         if active:
             out += [("class:info", "\n" + _("'ferma {id}' interrompe #{id}", id=active[-1].id))]
+        return FormattedText(out)
+
+    # ================================================================ agenda
+    def _agenda_height(self) -> int:
+        n = len(agenda.pending()) + min(2, len(agenda.recently_done(2)))
+        return max(3, min(AGENDA_MAX_LINES, n + 1))
+
+    def _render_agenda(self) -> FormattedText:
+        width = max(10, min(PANEL_WIDTH, self._columns()) - 4)
+        todo = agenda.pending()
+        done = agenda.recently_done(2)
+        if not todo and not done:
+            return FormattedText([("class:info", _("Nessun promemoria.\n'ricordami di … venerdì'"))])
+        out: list[tuple[str, str]] = []
+        style = {"overdue": "class:overdue", "today": "class:today", "soon": "class:due", "later": "class:due"}
+        for item in todo[:AGENDA_MAX_LINES]:
+            when = agenda.format_due(item.due_date)
+            st = item.status()
+            mark = "⚠" if st == "overdue" else "●" if st == "today" else " "
+            head = f"{mark}#{item.id} "
+            date_col = f"{when:<10} " if when else ""
+            text = item.text if len(head + date_col + item.text) <= width else \
+                item.text[: max(4, width - len(head + date_col) - 1)] + "…"
+            out += [("class:info", head), (style.get(st, ""), date_col), ("", text + "\n")]
+        if len(todo) > AGENDA_MAX_LINES:
+            out.append(("class:info", _("… e altri {n}", n=len(todo) - AGENDA_MAX_LINES) + "\n"))
+        for item in done:
+            text = item.text if len(item.text) <= width - 6 else item.text[: width - 7] + "…"
+            out.append(("class:done", f"✓#{item.id} {text}\n"))
         return FormattedText(out)
 
     def _render_status(self) -> FormattedText:

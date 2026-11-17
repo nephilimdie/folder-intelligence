@@ -23,7 +23,7 @@ class IndexCommand(Command):
 
     async def run(self, ctx, intent: Intent) -> str:
         scan = await ctx.get_scan(intent.path)
-        limit = int(intent.args.get("limit") or ctx.index_limit)
+        limit = int(intent.args.get("limit") or ctx.index_limit or 0) or None  # None = tutti
         engine = ctx.intelligence
         ai = ctx.ai
         caps = []
@@ -45,9 +45,12 @@ class IndexCommand(Command):
         if stats.skipped_cloud:
             lines.append(_("  ☁️  {n} solo su iCloud: saltati (scaricali per analizzarli).", n=stats.skipped_cloud))
         remaining = len(scan.files) - stats.analyzed - stats.skipped_fresh - stats.skipped_cloud
-        if remaining > 0:
+        if remaining > 0 and limit:
             lines.append(_("  {n} ancora da analizzare: ripeti 'indicizza' per continuare (massimo {limit} per volta).",
                            n=remaining, limit=limit))
+        elif remaining > 0:
+            lines.append(_("  {n} non analizzati (interrotto o illeggibili): ripeti 'indicizza' per riprendere.",
+                           n=remaining))
         if stats.engines:
             lines.append(_("  Motori usati: ") + ", ".join(f"{k} {v}" for k, v in
                                                         sorted(stats.engines.items(), key=lambda kv: -kv[1])))

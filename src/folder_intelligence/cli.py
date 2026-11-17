@@ -229,7 +229,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL,
                    help=_("modello embedding (default {model})", model=DEFAULT_EMBED_MODEL))
     p.add_argument("--no-vision", action="store_true", help=_("non usare il modello visivo (più veloce)"))
-    p.add_argument("--index-limit", type=int, default=200, help=_("massimo file analizzati per 'indicizza'"))
+    p.add_argument("--index-limit", type=int, default=0,
+                   help=_("massimo file analizzati per 'indicizza' (0 = tutti)"))
     p.add_argument("--mcp-mode", choices=MODES, default=None,
                    help=_("cosa registrare nella memoria MCP: sealed (default, solo inventario), summary, off"))
     p.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
@@ -259,7 +260,7 @@ def make_assistant(args: argparse.Namespace, progress: ProgressDisplay) -> Assis
         args.directory, memory=create_memory(args.memory), ollama=ai,
         use_ai=not args.no_ai, ai_limit=args.ai_limit, status=status,
         source="cli", progress=progress, use_vision=not args.no_vision,
-        index_limit=args.index_limit, mcp=McpMemory(args.mcp_mode),
+        index_limit=args.index_limit or None, mcp=McpMemory(args.mcp_mode),
         router_model=args.router_model, router_mode=args.router,
     )
 

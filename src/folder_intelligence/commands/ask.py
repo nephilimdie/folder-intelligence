@@ -24,11 +24,15 @@ class AskCommand(Command):
     async def run(self, ctx, intent: Intent) -> str:
         question = str(intent.args.get("query") or "").strip()
         scan = await ctx.get_scan(intent.path)
-        question_text = await ctx.require_index(scan, lambda: self.run(ctx, intent), _("rispondere"))
-        if question_text:
-            return question_text
+        # cartella non indicizzata ma altre sì: rispondiamo con tutto l'indice invece di chiedere
+        everywhere = ctx.globally_indexed(scan.root)
+        if not everywhere:
+            question_text = await ctx.require_index(scan, lambda: self.run(ctx, intent), _("rispondere"))
+            if question_text:
+                return question_text
         ctx.status(_("Cerco nei documenti …"))
-        answer, hits = await ctx.intelligence.ask(question, scan.root, [f.path for f in scan.files])
+        answer, hits = await ctx.intelligence.ask(question, None if everywhere else scan.root,
+                                                  None if everywhere else [f.path for f in scan.files])
         if not hits:
             return _("Non ho trovato documenti pertinenti alla domanda.")
         lines = [answer or _("Non riesco a formulare una risposta (AI non disponibile), ma questi file sembrano pertinenti:")]

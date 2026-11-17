@@ -30,6 +30,13 @@ class SearchCommand(Command):
             return _("Cosa devo cercare? Es. 'cerca fattura' o 'cerca le foto del mare'.")
         scan = await ctx.get_scan(intent.path)
         hits = await ctx.intelligence.search(query, scan.root, 20, names=[f.path for f in scan.files])
+        elsewhere = False
+        if not hits and ctx.intelligence.index.stats()["documents"]:
+            # niente qui: proviamo in tutte le cartelle già indicizzate (es. Documents indicizzata,
+            # ma la cartella di lavoro è ancora Downloads)
+            hits = [h for h in await ctx.intelligence.search(query, None, 20)
+                    if not h.path.startswith(str(scan.root) + "/")]
+            elsewhere = bool(hits)
 
         # filtro rapido anche per estensione/categoria ("cerca pdf", "cerca immagini")
         terms = normalize(query).split()
@@ -38,7 +45,7 @@ class SearchCommand(Command):
         seen = {h.path for h in hits}
         quick = [f for f in quick if str(f.path) not in seen]
 
-        if not hits and not quick:
+        if not hits and not quick and not elsewhere:
             q = await ctx.require_index(scan, lambda: self.run(ctx, intent),
                                         _("cercare dentro documenti, PDF e immagini"))
             if q:
@@ -57,6 +64,9 @@ class SearchCommand(Command):
              "snippet": h.snippet, **{k: (h.doc or {}).get(k) for k in ("title", "description", "category", "tags")}}
             for h in hits], "by_type": [str(f.path) for f in quick]}
         lines = [_("Risultati per '{query}':", query=query)]
+        if elsewhere:
+            lines = [_("Niente in {root}; ho trovato questo nelle altre cartelle indicizzate:", root=scan.root)]
+        data["elsewhere"] = elsewhere
         for i, h in enumerate(hits[:15], 1):
             d = h.doc or {}
             label = d.get("title") or d.get("name") or h.path.rsplit("/", 1)[-1]
@@ -69,7 +79,7 @@ class SearchCommand(Command):
             lines.append(_("    trovato per: {sources}", sources=", ".join(_(s) for s in dict.fromkeys(h.sources))))
         for f in quick[: max(0, 25 - len(hits))]:
             lines.append(f"  {format_size(f.size_bytes):>9}  {self.rel(f.path, scan.root)}")
-        if not ctx.intelligence.index.stats(scan.root)["documents"]:
+        if not elsewhere and not ctx.intelligence.index.stats(scan.root)["documents"]:
             q = await ctx.require_index(scan, lambda: self.run(ctx, intent),
                                         _("cercare anche dentro documenti e immagini"))
             if q:

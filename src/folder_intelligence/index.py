@@ -309,6 +309,30 @@ class Index:
                 return []
         return [(r["path"], -r["score"], r["snip"] or "") for r in rows]
 
+    def dated(self, spec: Any, root: Path | None = None, limit: int = 200) -> list[str]:
+        """Documenti che corrispondono a una data (`dates.DateSpec`): frase nel testo
+        ("31 03 2024", "marzo 2024"), data rilevata dall'AI nell'intervallo, o pattern nel nome."""
+        found: dict[str, None] = {}
+        scope, args = ("AND d.path LIKE ?", [f"{root}/%"]) if root else ("", [])
+        with self.conn() as c:
+            for phrase in spec.phrases:
+                q = '"' + phrase.replace('"', "") + '"'
+                try:
+                    rows = c.execute("SELECT d.path FROM docs_fts JOIN docs d ON d.id = docs_fts.rowid "
+                                     f"WHERE docs_fts MATCH ? {scope} LIMIT ?", [q, *args, limit]).fetchall()
+                except sqlite3.OperationalError:
+                    rows = []
+                found.update((r["path"], None) for r in rows)
+            rows = c.execute("SELECT path FROM docs d WHERE substr(json_extract(metadata, '$.date'), 1, 10) "
+                             f"BETWEEN ? AND ? {scope} LIMIT ?",
+                             [spec.start.isoformat(), spec.end.isoformat(), *args, limit]).fetchall()
+            found.update((r["path"], None) for r in rows)
+            for pattern in spec.name_patterns:
+                rows = c.execute(f"SELECT path FROM docs d WHERE lower(name) LIKE ? {scope} LIMIT ?",
+                                 [f"%{pattern.lower()}%", *args, limit]).fetchall()
+                found.update((r["path"], None) for r in rows)
+        return list(found)
+
     def semantic(self, vector: list[float], root: Path | None = None, limit: int = 50,
                  min_score: float = 0.35) -> list[tuple[str, float]]:
         sql, args = "SELECT path, embedding FROM docs WHERE embedding IS NOT NULL", []

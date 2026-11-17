@@ -80,6 +80,14 @@ When it finishes, the result appears in the conversation (with a confirmation se
 `activity` lists running tasks, `stop 3` stops #3, Ctrl+C stops the latest, Ctrl+D or `exit` quits
 (asking first if tasks are running). `--classic` starts the simple chat without panels.
 
+Under the Activity box there is the **📅 Agenda**: the things to do you add from the chat
+("remind me to pay the rent tomorrow", "add to my agenda renew the passport on Dec 20"), ordered by
+date — overdue in red, today highlighted, then upcoming ones, then those without a date; the last
+ones done appear greyed out. Dates are understood in English and Italian: today/tomorrow, weekdays,
+"in 3 days", "Nov 20", "20/12" (day/month), "2026-12-20". "done 2" marks #2 as done, "reopen 2"
+reopens it, "delete reminder 2" removes it. Stored encrypted (`agenda.enc`); API: `GET/POST /agenda`,
+`PATCH/DELETE /agenda/{id}`.
+
 To read back: **mouse wheel/trackpad**, PgUp/PgDn or ⇧↑/⇧↓; Esc or End jump to the bottom. If
 results arrive while you are reading further up, the view stays put and "● new messages" appears.
 Since the app captures the mouse, hold ⌥ Option while dragging to **select text**, or start with
@@ -112,7 +120,8 @@ Commands (natural language, type `help` in the chat):
 | `undo the last operation` | restores the moved files |
 | `show the history` | audit of all changes to files |
 | `undo operation 2`, `undo operation <id>` | restores a specific operation |
-| `remind me to …`, `what do you remember?` | persistent memory |
+| `remind me to pay the rent on Friday`, `what do I have to do?`, `done 2`, `delete reminder 2` | **agenda**: things to do with an optional date, shown under the Activity box |
+| `remember that bills go in Documents/Home`, `what do you remember?` | persistent memory (notes) |
 | `go to ~/Documents` | changes the working folder |
 
 Requests are interpreted by the local AI (see "How requests are understood").
@@ -234,6 +243,14 @@ Each result says *why* it was found.
 
 - Scanning reads **metadata only** (name, size, date): thousands of files in tenths of a second.
   Content is read only when needed (duplicates, indexing).
+- **Dates in searches** ("bank statement 31/03/2024", "March 2024", "03-2024", "statement March 31, 2024")
+  are a filter, not ordinary words: only documents of that date are kept — the date written in the
+  text ("31/03/2024" is found as a phrase), the date detected by the AI, or the date in the file name.
+- Commands with an explicit folder ("index Documents") make it the working folder, so the next
+  "search …" looks there. If the current folder isn't indexed, search and questions use the other
+  indexed folders and say so.
+- `index` reads **all** files of the folder (in the background, resumable; ETA shown first);
+  `--index-limit N` limits it.
 - Search ("search"): a document appears only if it is really relevant — the text must contain most
   of the words searched (2 of 2-3, half beyond; articles and elisions like Italian "dell'" ignored)
   and the semantic similarity must exceed 0.53 (`FI_SEMANTIC_MIN`; measured: relevant 0.55–0.71,
@@ -408,6 +425,8 @@ src/folder_intelligence/
   engines/       interchangeable AI engines (strategy): llamacpp, ollama, mlx
   extractors/    one file per content type (plugin): pdf, image, office, media, docintel…
   locales/       translations (en.json); i18n.py: _(), macOS language/--lang/Accept-Language
+  agenda.py      things to do with dates (encrypted), shown in the panel
+  dates.py       dates in natural language (it/en): search filters, due dates
   router.py      from a request to a plan of commands (AI + fallback rules)
   intelligence.py understanding pipeline, hybrid search, questions (local RAG)
   similarity.py  similar photos and documents

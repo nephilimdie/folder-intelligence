@@ -81,6 +81,14 @@ selettore di conferma). `attività` elenca quelle in corso, `ferma 3` interrompe
 Ctrl+C ferma l'ultima, Ctrl+D o `esci` chiude (chiedendo conferma se ci sono attività).
 `--classic` avvia la chat semplice senza pannelli.
 
+Sotto il box Attività c'è l'**📅 Agenda**: le cose da fare aggiunte dalla chat ("ricordami di pagare
+l'affitto domani", "aggiungi all'agenda rinnovare la patente il 20 dicembre"), in ordine di data —
+scadute in rosso, quelle di oggi evidenziate, poi le prossime, poi quelle senza data; le ultime fatte
+compaiono in grigio. Date capite in italiano e inglese: oggi/domani/dopodomani, giorni della settimana,
+"tra 3 giorni", "il 20 novembre", "20/12", "2026-12-20". "fatto 2" segna la #2 come fatta, "riapri 2" la
+riapre, "elimina promemoria 2" la toglie. Salvata cifrata (`agenda.enc`); API: `GET/POST /agenda`,
+`PATCH/DELETE /agenda/{id}`.
+
 Per rileggere la conversazione: **rotellina/trackpad**, PagSu/PagGiù o ⇧↑/⇧↓; Esc o Fine tornano
 in fondo. Se arrivano risultati mentre stai leggendo più in alto, la vista resta ferma e compare
 l'avviso "● nuovi messaggi". Poiché l'app riceve il mouse, per **selezionare testo** tieni premuto
@@ -114,7 +122,8 @@ Comandi (linguaggio naturale, scrivi `aiuto` in chat):
 | `annulla l'ultima operazione` | ripristina i file spostati |
 | `mostra lo storico` | audit di tutte le modifiche ai file |
 | `annulla operazione 2`, `annulla operazione <id>` | ripristina un'operazione specifica |
-| `ricordami di …`, `cosa ricordi?` | memoria persistente |
+| `ricordami di pagare l'affitto venerdì`, `cosa devo fare?`, `fatto 2`, `elimina promemoria 2` | **agenda**: cose da fare con data facoltativa, sotto il box Attività |
+| `ricordati che le bollette vanno in Documents/Casa`, `cosa ricordi?` | memoria persistente (note) |
 | `vai in ~/Documents` | cambia cartella di lavoro |
 
 Le frasi vengono interpretate dall'AI locale (vedi 'Come capisce le richieste').
@@ -236,6 +245,14 @@ gli estrattori locali.
 
 - La scansione legge **solo i metadati** (nome, dimensione, data): migliaia di file in decimi di secondo.
   Il contenuto viene letto solo quando serve (duplicati, indicizzazione).
+- **Date nelle ricerche** ("estratto conto del 31/03/2024", "marzo 2024", "03-2024") fanno da filtro, non
+  da parole qualsiasi: restano solo i documenti di quella data — scritta nel testo ("31/03/2024" cercata
+  come frase), rilevata dall'AI, o nel nome del file.
+- I comandi con una cartella esplicita ("indicizza Documents") la rendono la cartella di lavoro, così il
+  "cerca …" successivo cerca lì. Se la cartella corrente non è indicizzata, ricerca e domande usano le
+  altre cartelle indicizzate e lo dicono.
+- `indicizza` legge **tutti** i file della cartella (in background, riprendibile; prima mostra una stima
+  del tempo); `--index-limit N` lo limita.
 - Ricerca ("cerca"): un documento compare solo se è davvero pertinente — nel testo devono esserci
   quasi tutte le parole cercate (2 su 2-3, metà oltre; articoli e forme elise come "dell'" ignorati)
   e la somiglianza di significato deve superare 0.53 (`FI_SEMANTIC_MIN`; misurato: pertinenti
@@ -410,6 +427,8 @@ src/folder_intelligence/
   engines/       motori AI intercambiabili (strategy): llamacpp, ollama, mlx
   extractors/    un file per tipo di contenuto (plugin): pdf, image, office, media, docintel…
   locales/       traduzioni (en.json); i18n.py: _(), lingua di macOS/--lang/Accept-Language
+  agenda.py      cose da fare con data (cifrate), mostrate nel pannello
+  dates.py       date in linguaggio naturale (it/en): filtri di ricerca, scadenze
   router.py      dalla frase al piano di comandi (AI + regole di riserva)
   similarity.py  foto e documenti simili
   intelligence.py pipeline di comprensione, ricerca ibrida, domande (RAG locale)
